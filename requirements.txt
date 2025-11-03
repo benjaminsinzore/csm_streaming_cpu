@@ -29,3 +29,4 @@ matplotlib
 whisper-openai
 silentcipher @ git+https://github.com/SesameAILabs/silentcipher@master
 numpy==1.26.0
+
