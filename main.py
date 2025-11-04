@@ -35,6 +35,11 @@ from config import ConfigManager
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import re
 
+
+
+##NEW APPROACH
+from pathlib import Path
+
 speaking_start_time = 0.0
 MIN_BARGE_LATENCY = 0.9
 speaker_counters = {
@@ -128,18 +133,41 @@ config_manager = ConfigManager()
 model_id = "openai/whisper-large-v3-turbo"
 
 # Load model and processor from local cache only
+
+
+# Find the exact snapshot path
+cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
+model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
+
+# Get all snapshots and use the first one
+snapshots = list(model_cache_dir.iterdir())
+if not snapshots:
+    raise ValueError("No model snapshots found in cache!")
+
+# Use the first snapshot (usually the only one or most recent)
+snapshot_path = snapshots[0]
+print(f"Using model from: {snapshot_path}")
+
+# Verify config.json exists
+config_path = snapshot_path / "config.json"
+if not config_path.exists():
+    raise FileNotFoundError(f"config.json not found at {config_path}")
+
+# Load using the direct local path
+model_id = str(snapshot_path)
+
 whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
-    model_id, 
+    model_id,
     torch_dtype=torch.float32, 
     low_cpu_mem_usage=True, 
     use_safetensors=True,
-    local_files_only=True  # Add this line
+    local_files_only=True
 )
 whisper_model.to("cpu")
 
 processor = AutoProcessor.from_pretrained(
     model_id,
-    local_files_only=True  # Add this line too
+    local_files_only=True
 )
 
 whisper_pipe = pipeline(
