@@ -108,12 +108,40 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
+#model_id = "openai/whisper-large-v3-turbo"
+#whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+#    model_id, torch_dtype=torch.float32, low_cpu_mem_usage=True, use_safetensors=True
+#)
+#whisper_model.to("cpu")
+#processor = AutoProcessor.from_pretrained(model_id)
+#whisper_pipe = pipeline(
+#    "automatic-speech-recognition",
+#    model=whisper_model,
+#    tokenizer=processor.tokenizer,
+#    feature_extractor=processor.feature_extractor,
+#    torch_dtype=torch.float32,
+#    device=-1,
+#)
+
+### NEW CODE FROM THIS POINT
+
 model_id = "openai/whisper-large-v3-turbo"
+
+# Load model and processor from local cache only
 whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
-    model_id, torch_dtype=torch.float32, low_cpu_mem_usage=True, use_safetensors=True
+    model_id, 
+    torch_dtype=torch.float32, 
+    low_cpu_mem_usage=True, 
+    use_safetensors=True,
+    local_files_only=True  # Add this line
 )
 whisper_model.to("cpu")
-processor = AutoProcessor.from_pretrained(model_id)
+
+processor = AutoProcessor.from_pretrained(
+    model_id,
+    local_files_only=True  # Add this line too
+)
+
 whisper_pipe = pipeline(
     "automatic-speech-recognition",
     model=whisper_model,
@@ -122,6 +150,8 @@ whisper_pipe = pipeline(
     torch_dtype=torch.float32,
     device=-1,
 )
+
+#### TO THIS POINT 
 
 async def process_message_queue():
     while True:
