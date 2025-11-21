@@ -295,7 +295,7 @@ def initialize_models(config_data: CompanionConfig):
         utils=vad_utils,
         sample_rate=16_000,
         vad_threshold=config_data.vad_threshold,
-        callbacks={"on_speech_start": on_speech_start, "on_speech_end": on_h_speech_end},
+        callbacks={"on_speech_start": on_speech_start, "on_speech_end": on_speech_end},
     )
     load_reference_segments(config_data)
     start_model_thread()
