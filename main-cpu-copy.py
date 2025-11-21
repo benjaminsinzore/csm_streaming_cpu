@@ -1,3 +1,4 @@
+
 import asyncio
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -33,6 +34,8 @@ import logging
 from config import ConfigManager
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import re
+
+
 
 ##NEW APPROACH
 from pathlib import Path
@@ -74,25 +77,6 @@ class Conversation(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# Define your default configuration here
-DEFAULT_CONFIG = CompanionConfig(
-    system_prompt="You are a friendly AI.",
-    model_path="./finetuned_model", # Update this path
-    llm_path="./models/llama3-8b-instruct.gguf", # Update this path
-    reference_audio_path="./reference.wav", # Update this path
-    reference_text="Hi, how can I help?",
-    reference_audio_path2="", # Optional
-    reference_text2="",       # Optional
-    reference_audio_path3="", # Optional
-    reference_text3="",       # Optional
-    # Add other default values if your CompanionConfig model has them
-    max_tokens=8192,
-    voice_speaker_id=0,
-    vad_enabled=True,
-    vad_threshold=0.5,
-    embedding_model="all-MiniLM-L6-v2"
-)
-
 class CompanionConfig(BaseModel):
     system_prompt: str
     reference_audio_path: str
@@ -127,27 +111,54 @@ asyncio.set_event_loop(loop)
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates") # This might still be needed if you use chat.html
+templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
+#model_id = "openai/whisper-large-v3-turbo"
+#whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+#    model_id, torch_dtype=torch.float32, low_cpu_mem_usage=True, use_safetensors=True
+#)
+#whisper_model.to("cpu")
+#processor = AutoProcessor.from_pretrained(model_id)
+#whisper_pipe = pipeline(
+#    "automatic-speech-recognition",
+#    model=whisper_model,
+#    tokenizer=processor.tokenizer,
+#    feature_extractor=processor.feature_extractor,
+#    torch_dtype=torch.float32,
+#    device=-1,
+#)
 
-# --- Whisper Model Loading Code (as before) ---
+### NEW CODE FROM THIS POINT
+
 model_id = "openai/whisper-large-v3-turbo"
+
+# Load model and processor from local cache only
+
+# Find the exact snapshot path
 cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
 model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
+
+# Get all snapshots and use the first one
 snapshots = list(model_cache_dir.iterdir())
 if not snapshots:
     raise ValueError("No model snapshots found in cache!")
+
+# Use the first snapshot (usually the only one or most recent)
 snapshot_path = snapshots[0]
-print(f"Using Whisper model from: {snapshot_path}")
+print(f"Using model from: {snapshot_path}")
+
+# Verify config.json exists
 config_path = snapshot_path / "config.json"
 if not config_path.exists():
     raise FileNotFoundError(f"config.json not found at {config_path}")
+
+# Load using the direct local path
 model_id = str(snapshot_path)
 
 whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
     model_id,
-    torch_dtype=torch.float32,
-    low_cpu_mem_usage=True,
+    torch_dtype=torch.float32, 
+    low_cpu_mem_usage=True, 
     use_safetensors=True,
     local_files_only=True
 )
@@ -166,7 +177,8 @@ whisper_pipe = pipeline(
     torch_dtype=torch.float32,
     device=-1,
 )
-# --- End Whisper Model Loading ---
+
+#### TO THIS POINT 
 
 async def process_message_queue():
     while True:
@@ -223,13 +235,9 @@ def initialize_models(config_data: CompanionConfig):
     global generator, llm, rag, vad_processor, config
     config = config_data
     logger.info("Loading LLM …")
-    print("Loading LLM …") # Print to terminal
     llm = LLMInterface(config_data.llm_path, config_data.max_tokens)
     logger.info("Loading RAG …")
-    print("Loading RAG …") # Print to terminal
     rag = RAGSystem("companion.db", model_name=config_data.embedding_model)
-    logger.info("Loading VAD model …")
-    print("Loading VAD model …") # Print to terminal
     vad_model, vad_utils = torch.hub.load('snakers4/silero-vad', model='silero_vad', force_reload=False)
     vad_processor = AudioStreamProcessor(
         model=vad_model,
@@ -241,7 +249,6 @@ def initialize_models(config_data: CompanionConfig):
     load_reference_segments(config_data)
     start_model_thread()
     logger.info("Warming up voice model …")
-    print("Warming up voice model …") # Print to terminal
     t0 = time.time()
     model_queue.put((
         "warm-up.", config_data.voice_speaker_id, [], 500, 0.7, 40,
@@ -251,9 +258,6 @@ def initialize_models(config_data: CompanionConfig):
         if r is None:
             break
     logger.info(f"Voice model ready in {time.time() - t0:.1f}s")
-    print(f"Voice model ready in {time.time() - t0:.1f}s") # Print to terminal
-    print("--- Initialization Complete ---") # Print to terminal
-    logger.info("--- Initialization Complete ---")
 
 def on_speech_start():
     asyncio.run_coroutine_threadsafe(
@@ -395,13 +399,10 @@ def process_user_input(user_text, session_id="default"):
 def model_worker(cfg: CompanionConfig):
     global generator, model_thread_running
     logger.info("Model worker thread started")
-    print("Model worker thread started") # Print to terminal
     if generator is None:
         logger.info("Loading voice model inside worker thread …")
-        print("Loading voice model inside worker thread …") # Print to terminal
         generator = load_csm_1b_local(cfg.model_path, "cpu")
         logger.info("Voice model ready")
-        print("Voice model ready") # Print to terminal
     while model_thread_running.is_set():
         try:
             request = model_queue.get(timeout=0.1)
@@ -424,10 +425,8 @@ def model_worker(cfg: CompanionConfig):
         except Exception as e:
             import traceback
             logger.error(f"Error in model worker: {e}\n{traceback.format_exc()}")
-            print(f"Error in model worker: {e}\n{traceback.format_exc()}") # Print to terminal
             model_result_queue.put(Exception(f"Generation error: {e}"))
     logger.info("Model worker thread exiting")
-    print("Model worker thread exiting") # Print to terminal
 
 def start_model_thread():
     global model_thread, model_thread_running
@@ -764,29 +763,35 @@ async def websocket_endpoint(websocket: WebSocket):
     global is_speaking, audio_queue
     await websocket.accept()
     active_connections.append(websocket)
-    # Removed loading saved config request
+    saved = config_manager.load_config()
+    if saved:
+        await websocket.send_json({"type": "saved_config", "config": saved})
     try:
         while True:
             data = await websocket.receive_json()
             if data["type"] == "config":
-                # Optional: Allow dynamic config via WebSocket if needed, but not for startup init
-                # For startup, we use the DEFAULT_CONFIG
                 try:
                     config_data = data["config"]
+                    logger.info(f"Received config data keys: {config_data.keys()}")
+                    for key in ["reference_audio_path", "reference_audio_path2", "reference_audio_path3",
+                                "reference_text", "reference_text2", "reference_text3"]:
+                        if key in config_data:
+                            logger.info(f"Config includes {key}: {config_data[key]}")
+                        else:
+                            logger.warning(f"Config missing {key}")
                     conf = CompanionConfig(**config_data)
-                    # Optional: Save config if received via WebSocket
-                    # saved = config_manager.save_config(config_data)
-                    initialize_models(conf)
-                    await websocket.send_json({"type": "status", "message": "Models initialized and configuration saved"})
+                    saved = config_manager.save_config(config_data)
+                    if saved:
+                        initialize_models(conf)
+                        await websocket.send_json({"type": "status", "message": "Models initialized and configuration saved"})
+                    else:
+                        await websocket.send_json({"type": "error", "message": "Failed to save configuration"})
                 except Exception as e:
                     logger.error(f"Error processing config: {str(e)}")
                     await websocket.send_json({"type": "error", "message": f"Configuration error: {str(e)}"})
             elif data["type"] == "request_saved_config":
-                # Optional: Send current config if requested
-                if config:
-                    await websocket.send_json({"type": "saved_config", "config": config.dict()})
-                else:
-                    await websocket.send_json({"type": "saved_config", "config": None})
+                saved = config_manager.load_config()
+                await websocket.send_json({"type": "saved_config", "config": saved})
             elif data["type"] == "text_message":
                 user_text = data["text"]
                 session_id = data.get("session_id", "default")
@@ -797,7 +802,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             pending_user_inputs = pending_user_inputs[-2:]
                         pending_user_inputs.append((user_text, session_id))
                     await websocket.send_json(
-                        {"type": "status", "message": "Queued – I'll answer in a moment"})
+                        {"type": "status", "message": "Queued – I’ll answer in a moment"})
                     continue
                 await message_queue.put({"type": "transcription", "text": user_text})
                 threading.Thread(
@@ -854,15 +859,13 @@ async def websocket_endpoint(websocket: WebSocket):
         if websocket in active_connections:
             active_connections.remove(websocket)
 
-# Removed the /setup route
-# @app.get("/setup", response_class=HTMLResponse)
-# async def setup_page(request: Request):
-#     return templates.TemplateResponse("setup.html", {"request": request})
-
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    # Changed redirect from /setup to /chat
     return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request):
+    return templates.TemplateResponse("setup.html", {"request": request})
 
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
@@ -875,22 +878,13 @@ async def startup_event():
     os.makedirs("audio/ai", exist_ok=True)
     os.makedirs("embeddings_cache", exist_ok=True)
     os.makedirs("templates", exist_ok=True)
-    # Changed index.html to redirect to /chat instead of /setup
     with open("templates/index.html", "w") as f:
-        f.write("""<meta http-equiv="refresh" content="0; url=/chat" />""")
+        f.write("""<meta http-equiv="refresh" content="0; url=/setup" />""")
     try:
         torch.hub.load('snakers4/silero-vad', model='silero_vad', force_reload=False)
     except:
         pass
     asyncio.create_task(process_message_queue())
-
-    # --- NEW: Automatic Initialization ---
-    print("--- Starting Automatic Initialization ---")
-    logger.info("--- Starting Automatic Initialization ---")
-    # Run the initialization in a separate thread so the server startup doesn't block
-    init_thread = threading.Thread(target=initialize_models, args=(DEFAULT_CONFIG,), daemon=True)
-    init_thread.start()
-    # --- END NEW ---
 
 @app.on_event("shutdown")
 async def shutdown_event():
