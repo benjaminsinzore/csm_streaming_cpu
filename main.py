@@ -521,9 +521,30 @@ saved_audio_paths = {
     }
 }
 MAX_AUDIO_FILES = 8
+### OLD FUNCTION
+#def save_audio_and_trim(path, session_id, speaker_id, tensor, sample_rate):
+#    torchaudio.save(path, tensor.unsqueeze(0), sample_rate)
+#    saved_audio_paths.setdefault(session_id, {}).setdefault(speaker_id, []).append(path)
+#    paths = saved_audio_paths[session_id][speaker_id]
+#    while len(paths) > MAX_AUDIO_FILES:
+#        old_path = paths.pop(0)
+#        if os.path.exists(old_path):
+#            os.remove(old_path)
+#            logger.info(f"Removed old audio file: {old_path}")
+#    other_speaker_id = 1 if speaker_id == 0 else 0
+#    if other_speaker_id in saved_audio_paths[session_id]:
+#        other_paths = saved_audio_paths[session_id][other_speaker_id]
+#        while len(other_paths) > MAX_AUDIO_FILES:
+#            old_path = other_paths.pop(0)
+#            if os.path.exists(old_path):
+#                os.remove(old_path)
+#                logger.info(f"Removed old audio file from other speaker: {old_path}")
 
+### UPDATE OF THE ABOVE
 def save_audio_and_trim(path, session_id, speaker_id, tensor, sample_rate):
-    torchaudio.save(path, tensor.unsqueeze(0), sample_rate)
+    # Explicitly specify the format as 'wav'
+    torchaudio.save(path, tensor.unsqueeze(0), sample_rate, format='wav')
+    # ... rest of the function logic remains the same ...
     saved_audio_paths.setdefault(session_id, {}).setdefault(speaker_id, []).append(path)
     paths = saved_audio_paths[session_id][speaker_id]
     while len(paths) > MAX_AUDIO_FILES:
