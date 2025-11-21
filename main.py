@@ -134,7 +134,6 @@ model_id = "openai/whisper-large-v3-turbo"
 
 # Load model and processor from local cache only
 
-
 # Find the exact snapshot path
 cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
 model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
