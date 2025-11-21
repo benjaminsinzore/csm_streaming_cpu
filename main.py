@@ -37,6 +37,77 @@ import re
 ##NEW APPROACH
 from pathlib import Path
 
+# --- Define CompanionConfig BEFORE using it ---
+class CompanionConfig(BaseModel):
+    system_prompt: str
+    reference_audio_path: str
+    reference_text: str
+    reference_audio_path2: Optional[str] = None
+    reference_text2: Optional[str] = None
+    reference_audio_path3: Optional[str] = None
+    reference_text3: Optional[str] = None
+    model_path: str
+    llm_path: str
+    max_tokens: int = 8192
+    voice_speaker_id: int = 0
+    vad_enabled: bool = True
+    vad_threshold: float = 0.5
+    embedding_model: str = "all-MiniLM-L6-v2"
+
+# --- Load Default Configuration from JSON file ---
+CONFIG_FILE_PATH = "config/app_config.json" # Adjust path if necessary
+try:
+    with open(CONFIG_FILE_PATH, 'r') as f:
+        config_dict = json.load(f)
+    # Add default values for fields not in the JSON if needed
+    config_dict.setdefault('max_tokens', 8192)
+    config_dict.setdefault('voice_speaker_id', 0)
+    config_dict.setdefault('vad_enabled', True)
+    config_dict.setdefault('vad_threshold', 0.5)
+    config_dict.setdefault('embedding_model', "all-MiniLM-L6-v2")
+    DEFAULT_CONFIG = CompanionConfig(**config_dict)
+    print(f"Loaded default configuration from {CONFIG_FILE_PATH}")
+except FileNotFoundError:
+    print(f"Configuration file {CONFIG_FILE_PATH} not found. Using hardcoded defaults.")
+    # Fallback to hardcoded defaults if the file is missing
+    DEFAULT_CONFIG = CompanionConfig(
+        system_prompt="You are a friendly AI.",
+        model_path="./finetuned_model", # Update this path if needed
+        llm_path="./models/llama3-8b-instruct.gguf", # Update this path if needed
+        reference_audio_path="./reference.wav", # Update this path if needed
+        reference_text="Hi, how can I help?",
+        reference_audio_path2="", # Optional
+        reference_text2="",       # Optional
+        reference_audio_path3="", # Optional
+        reference_text3="",       # Optional
+        # Add other default values if your CompanionConfig model has them
+        max_tokens=8192,
+        voice_speaker_id=0,
+        vad_enabled=True,
+        vad_threshold=0.5,
+        embedding_model="all-MiniLM-L6-v2"
+    )
+except json.JSONDecodeError as e:
+    print(f"Error parsing {CONFIG_FILE_PATH}: {e}. Using hardcoded defaults.")
+    DEFAULT_CONFIG = CompanionConfig(
+        system_prompt="You are a friendly AI.",
+        model_path="./finetuned_model", # Update this path if needed
+        llm_path="./models/llama3-8b-instruct.gguf", # Update this path if needed
+        reference_audio_path="./reference.wav", # Update this path if needed
+        reference_text="Hi, how can I help?",
+        reference_audio_path2="", # Optional
+        reference_text2="",       # Optional
+        reference_audio_path3="", # Optional
+        reference_text3="",       # Optional
+        # Add other default values if your CompanionConfig model has them
+        max_tokens=8192,
+        voice_speaker_id=0,
+        vad_enabled=True,
+        vad_threshold=0.5,
+        embedding_model="all-MiniLM-L6-v2"
+    )
+
+# --- Rest of your constants ---
 speaking_start_time = 0.0
 MIN_BARGE_LATENCY = 0.9
 speaker_counters = {
@@ -74,40 +145,28 @@ class Conversation(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# Define your default configuration here
-DEFAULT_CONFIG = CompanionConfig(
-    system_prompt="You are a friendly AI.",
-    model_path="./finetuned_model", # Update this path
-    llm_path="./models/llama3-8b-instruct.gguf", # Update this path
-    reference_audio_path="./reference.wav", # Update this path
-    reference_text="Hi, how can I help?",
-    reference_audio_path2="", # Optional
-    reference_text2="",       # Optional
-    reference_audio_path3="", # Optional
-    reference_text3="",       # Optional
-    # Add other default values if your CompanionConfig model has them
-    max_tokens=8192,
-    voice_speaker_id=0,
-    vad_enabled=True,
-    vad_threshold=0.5,
-    embedding_model="all-MiniLM-L6-v2"
-)
+# ... (Rest of the code remains the same from here onwards) ...
 
-class CompanionConfig(BaseModel):
-    system_prompt: str
-    reference_audio_path: str
-    reference_text: str
-    reference_audio_path2: Optional[str] = None
-    reference_text2: Optional[str] = None
-    reference_audio_path3: Optional[str] = None
-    reference_text3: Optional[str] = None
-    model_path: str
-    llm_path: str
-    max_tokens: int = 8192
-    voice_speaker_id: int = 0
-    vad_enabled: bool = True
-    vad_threshold: float = 0.5
-    embedding_model: str = "all-MiniLM-L6-v2"
+# Define your default configuration here
+# DEFAULT_CONFIG = CompanionConfig( # <-- This was moved to the top
+#     system_prompt="You are a friendly AI.",
+#     model_path="./finetuned_model",
+#     llm_path="./models/llama3-8b-instruct.gguf",
+#     reference_audio_path="./reference.wav",
+#     reference_text="Hi, how can I help?",
+#     reference_audio_path2="", # Optional
+#     reference_text2="",       # Optional
+#     reference_audio_path3="", # Optional
+#     reference_text3="",       # Optional
+#     # Add other default values if your CompanionConfig model has them
+#     max_tokens=8192,
+#     voice_speaker_id=0,
+#     vad_enabled=True,
+#     vad_threshold=0.5,
+#     embedding_model="all-MiniLM-L6-v2"
+# )
+
+# ... (The rest of the code continues as before, ensuring CompanionConfig is defined before any function that uses it) ...
 
 conversation_history = []
 config = None
@@ -236,7 +295,7 @@ def initialize_models(config_data: CompanionConfig):
         utils=vad_utils,
         sample_rate=16_000,
         vad_threshold=config_data.vad_threshold,
-        callbacks={"on_speech_start": on_speech_start, "on_speech_end": on_speech_end},
+        callbacks={"on_speech_start": on_speech_start, "on_speech_end": on_h_speech_end},
     )
     load_reference_segments(config_data)
     start_model_thread()
