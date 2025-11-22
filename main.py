@@ -32,7 +32,6 @@ import bcrypt
 from config import ConfigManager
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import re
-from datetime import datetime, timedelta
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pathlib import Path
@@ -57,6 +56,15 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # Password hashing
+
+
+from datetime import datetime, timedelta
+import time
+
+# JWT Configuration - FIXED
+SECRET_KEY = "your-secret-key-change-this-in-production"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 #pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
@@ -238,15 +246,21 @@ def authenticate_user(db, email: str, password: str):
         return None
     return user
 
+
+
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.now() + expires_delta
+        expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.now() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire.timestamp()})
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    # Use integer timestamp for JWT expiration
+    to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     credentials_exception = HTTPException(
@@ -1006,10 +1020,10 @@ async def websocket_endpoint(websocket: WebSocket):
     
     if not token:
         logger.warning("WebSocket connection attempted without token")
-        await websocket.close(code=1008)  # Policy violation
+        await websocket.close(code=1008)
         return
 
-    # Verify token
+    # Verify token with better error handling
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email = payload.get("sub")
@@ -1030,8 +1044,20 @@ async def websocket_endpoint(websocket: WebSocket):
             
         logger.info(f"WebSocket authenticated for user: {email}")
             
-    except JWTError as e:
+    except jwt.ExpiredSignatureError:
+        logger.warning("WebSocket token expired")
+        await websocket.send_json({
+            "type": "error",
+            "message": "Token expired. Please login again."
+        })
+        await websocket.close(code=1008)
+        return
+    except jwt.JWTError as e:
         logger.warning(f"WebSocket token validation failed: {e}")
+        await websocket.send_json({
+            "type": "error", 
+            "message": "Invalid token. Please login again."
+        })
         await websocket.close(code=1008)
         return
     except Exception as e:
@@ -1287,26 +1313,24 @@ async def login_for_access_token(response: Response, form_data: UserLogin):
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="Incorrect email or password"
         )
 
+    # Create token with proper expiration
     access_token = create_access_token(data={"sub": user.email})
     
-    # Set the token as a cookie for browser requests
+    # Set the token as a cookie
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         max_age=30 * 60,  # 30 minutes
-        secure=False,  # Set to True in production with HTTPS
+        secure=False,
         samesite="lax"
     )
     
-    # Return a redirect response instead of JSON
-    return RedirectResponse(url="/chat", status_code=status.HTTP_303_SEE_OTHER)
-
-
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/register")
 async def register_user(response: Response, user_data: UserCreate):
@@ -1317,7 +1341,7 @@ async def register_user(response: Response, user_data: UserCreate):
     if existing_user:
         db.close()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail="User with this email already exists"
         )
 
@@ -1325,22 +1349,20 @@ async def register_user(response: Response, user_data: UserCreate):
     user = create_user(db, user_data.email, user_data.password)
     db.close()
 
-    # Create access token
+    # Create token with proper expiration
     access_token = create_access_token(data={"sub": user.email})
     
-    # Set the token as a cookie for browser requests
+    # Set the token as a cookie
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         max_age=30 * 60,  # 30 minutes
-        secure=False,  # Set to True in production with HTTPS
+        secure=False,
         samesite="lax"
     )
     
-    # Return a redirect response instead of JSON
-    return RedirectResponse(url="/chat", status_code=status.HTTP_303_SEE_OTHER)
-
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 @app.on_event("startup")

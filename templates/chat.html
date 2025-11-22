@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Companion - Chat</title>
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css    " rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js    "></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body, html {
       background-color: #030712 !important;
@@ -84,6 +84,21 @@
       top: 64px;
       bottom: 0;
     }
+
+    /* Token error styling */
+    .token-error {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(220, 38, 38, 0.9);
+      color: white;
+      padding: 2rem;
+      border-radius: 10px;
+      text-align: center;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+    }
     
     /* Mobile layout */
     @media (max-width: 768px) {
@@ -107,11 +122,23 @@
 
   <div id="voice-circle"></div>
 
+  <!-- Token Error Overlay -->
+  <div id="tokenError" class="token-error hidden">
+    <div class="text-2xl mb-4">🔐 Authentication Required</div>
+    <div class="mb-4" id="tokenErrorMessage">Your session has expired or is invalid.</div>
+    <button onclick="handleTokenError()" class="bg-white text-red-600 px-6 py-2 rounded-lg font-semibold hover:bg-gray-100">
+      Go to Login
+    </button>
+  </div>
+
   <header class="header-container bg-gray-900 p-4 flex justify-between items-center shadow-md">
     <h1 class="text-2xl font-bold text-indigo-400">AI Companion</h1>
-    <button id="settingsBtn" class="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded shadow">
-      Settings
-    </button>
+    <div class="flex items-center space-x-4">
+      <span id="userWelcome" class="text-sm text-gray-300">Welcome, {{ user }}</span>
+      <button id="settingsBtn" class="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded shadow">
+        Settings
+      </button>
+    </div>
   </header>
 
   <div class="flex flex-row">
@@ -241,7 +268,170 @@
       </div>
     </div>
   </div>
+
+  <script>
+    // Token handling functions
+    function getToken() {
+      // Try multiple sources for token
+      let token = localStorage.getItem('access_token');
+      if (token) return token;
+      
+      // Try to extract from URL parameters
+      const urlParams = new URLSearchParams(window.location.search);
+      token = urlParams.get('token');
+      if (token) {
+        localStorage.setItem('access_token', token);
+        return token;
+      }
+      
+      // Check if we have a cookie (handled by browser automatically for same-origin requests)
+      return null;
+    }
+
+    function showTokenError(message) {
+      const tokenError = document.getElementById('tokenError');
+      const tokenErrorMessage = document.getElementById('tokenErrorMessage');
+      
+      tokenErrorMessage.textContent = message;
+      tokenError.classList.remove('hidden');
+      
+      // Disable all interactive elements
+      document.getElementById('micToggleBtn').disabled = true;
+      document.getElementById('textInput').disabled = true;
+      document.getElementById('sendTextBtn').disabled = true;
+      document.getElementById('settingsBtn').disabled = true;
+    }
+
+    function hideTokenError() {
+      const tokenError = document.getElementById('tokenError');
+      tokenError.classList.add('hidden');
+      
+      // Re-enable interactive elements
+      document.getElementById('micToggleBtn').disabled = false;
+      document.getElementById('textInput').disabled = false;
+      document.getElementById('sendTextBtn').disabled = false;
+      document.getElementById('settingsBtn').disabled = false;
+    }
+
+    function handleTokenError() {
+      // Clear stored token and redirect to login
+      localStorage.removeItem('access_token');
+      window.location.href = '/login';
+    }
+
+    function validateToken(token) {
+      if (!token) return false;
+      
+      try {
+        // Basic JWT validation - check if it's a properly formatted JWT
+        const parts = token.split('.');
+        if (parts.length !== 3) return false;
+        
+        // Try to decode the payload to check expiration
+        const payload = JSON.parse(atob(parts[1]));
+        const now = Math.floor(Date.now() / 1000);
+        
+        if (payload.exp && payload.exp < now) {
+          return false; // Token expired
+        }
+        
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // Initialize token check when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+      const token = getToken();
+      
+      if (!token) {
+        showTokenError('No authentication token found. Please login to continue.');
+        return;
+      }
+      
+      if (!validateToken(token)) {
+        showTokenError('Your session has expired. Please login again.');
+        return;
+      }
+      
+      // Token is valid, proceed with normal initialization
+      hideTokenError();
+      initializeChat();
+    });
+
+    function initializeChat() {
+      // Your existing chat initialization code goes here
+      console.log('Initializing chat with valid token...');
+      
+      // Update connection status
+      document.getElementById('connectionStatus').textContent = 'Authenticated';
+      document.getElementById('connectionStatus').className = 'text-green-400';
+      
+      // Continue with your existing WebSocket connection and chat functionality
+      // This is where you would connect to your WebSocket endpoint
+    }
+
+    // WebSocket connection with token handling
+    function connectWebSocket() {
+      const token = getToken();
+      if (!token || !validateToken(token)) {
+        showTokenError('Cannot connect: Invalid or missing authentication token.');
+        return null;
+      }
+
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
+        const ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          console.log('WebSocket connected successfully');
+          hideTokenError();
+          document.getElementById('connectionStatus').textContent = 'Connected';
+          document.getElementById('connectionStatus').className = 'text-green-400';
+        };
+        
+        ws.onclose = (event) => {
+          console.log('WebSocket closed:', event.code, event.reason);
+          
+          if (event.code === 1008) { // Policy violation - usually authentication issues
+            showTokenError('Authentication failed. Please login again.');
+          } else if (event.code === 1013) { // Try again later - models not loaded
+            document.getElementById('connectionStatus').textContent = 'Models Loading...';
+            document.getElementById('connectionStatus').className = 'text-yellow-400';
+            // Attempt reconnect after delay
+            setTimeout(connectWebSocket, 5000);
+          } else {
+            document.getElementById('connectionStatus').textContent = 'Disconnected';
+            document.getElementById('connectionStatus').className = 'text-red-400';
+            // Attempt reconnect for other errors
+            setTimeout(connectWebSocket, 3000);
+          }
+        };
+        
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          document.getElementById('connectionStatus').textContent = 'Connection Error';
+          document.getElementById('connectionStatus').className = 'text-red-400';
+        };
+        
+        return ws;
+      } catch (error) {
+        console.error('Failed to create WebSocket:', error);
+        showTokenError('Connection failed. Please check your network and try again.');
+        return null;
+      }
+    }
+
+    // Call this when you're ready to establish WebSocket connection
+    function startWebSocket() {
+      if (validateToken(getToken())) {
+        connectWebSocket();
+      }
+    }
+  </script>
   
   <script src="/static/chat.js"></script>
 </body>
-</html> 
+</html>
