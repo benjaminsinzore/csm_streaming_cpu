@@ -162,46 +162,26 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
 
-# Replace the existing password functions with these:
 
+# Change this line at the top of your file:
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+
+# Then use these simplified password functions:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash, handling bcrypt's 72-byte limit."""
+    """Verify a password against its hash using Argon2."""
     try:
-        # Ensure password is truncated to 72 bytes for bcrypt
-        if isinstance(plain_password, str):
-            # Encode to bytes and truncate to 72 bytes
-            password_bytes = plain_password.encode('utf-8')
-            if len(password_bytes) > 72:
-                password_bytes = password_bytes[:72]
-            # Convert back to string for passlib
-            truncated_password = password_bytes.decode('utf-8', errors='ignore')
-        else:
-            truncated_password = plain_password
-            
-        return pwd_context.verify(truncated_password, hashed_password)
+        return pwd_context.verify(plain_password, hashed_password)
     except Exception as e:
         logger.error(f"Password verification error: {e}")
         return False
 
 def get_password_hash(password: str) -> str:
-    """Hash a password, handling bcrypt's 72-byte limit."""
+    """Hash a password using Argon2."""
     try:
-        # Ensure password is truncated to 72 bytes for bcrypt
-        if isinstance(password, str):
-            # Encode to bytes and truncate to 72 bytes
-            password_bytes = password.encode('utf-8')
-            if len(password_bytes) > 72:
-                password_bytes = password_bytes[:72]
-            # Convert back to string for passlib
-            truncated_password = password_bytes.decode('utf-8', errors='ignore')
-        else:
-            truncated_password = password
-            
-        return pwd_context.hash(truncated_password)
+        return pwd_context.hash(password)
     except Exception as e:
         logger.error(f"Password hashing error: {e}")
         raise HTTPException(status_code=500, detail="Failed to process password")
-
 def create_user(db, email: str, password: str):
     hashed_password = get_password_hash(password)
     user = User(email=email, hashed_password=hashed_password)
