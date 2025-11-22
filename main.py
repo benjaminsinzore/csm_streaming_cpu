@@ -37,6 +37,11 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pathlib import Path
 
+
+
+from fastapi import HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
 # JWT Configuration
 SECRET_KEY = "your-secret-key-change-this-in-production"
 ALGORITHM = "HS256"
@@ -891,16 +896,16 @@ def handle_interrupt(websocket):
     logger.info("No active speech to interrupt")
     return False
 
+
+
+
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str = None):
-    global config, vad_processor
+async def websocket_endpoint(websocket: WebSocket):
+    # Get token from query parameters
+    token = websocket.query_params.get("token")
     
-    # Check if models are loaded
-    if not models_loaded:
-        await websocket.close(code=1013)  # Try again later
-        return
-        
     if not token:
+        logger.warning("WebSocket connection attempted without token")
         await websocket.close(code=1008)  # Policy violation
         return
 
@@ -909,19 +914,57 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email = payload.get("sub")
         if email is None:
+            logger.warning("WebSocket token missing email")
             await websocket.close(code=1008)
             return
-    except JWTError:
+            
+        # Verify user exists in database
+        db = SessionLocal()
+        user = get_user_by_email(db, email)
+        db.close()
+        
+        if not user:
+            logger.warning(f"WebSocket user not found: {email}")
+            await websocket.close(code=1008)
+            return
+            
+        logger.info(f"WebSocket authenticated for user: {email}")
+            
+    except JWTError as e:
+        logger.warning(f"WebSocket token validation failed: {e}")
+        await websocket.close(code=1008)
+        return
+    except Exception as e:
+        logger.error(f"WebSocket authentication error: {e}")
         await websocket.close(code=1008)
         return
 
-    await websocket.accept()
+    # Check if models are loaded
+    if not models_loaded:
+        logger.warning("WebSocket connection attempted but models not loaded")
+        await websocket.send_json({
+            "type": "error", 
+            "message": "Models not loaded yet. Please check configuration."
+        })
+        await websocket.close(code=1013)  # Try again later
+        return
 
+    await websocket.accept()
+    
+    # Add to active connections
+    active_connections.append(websocket)
+    
     # Add to session manager with user-specific data
     user_data = {"email": email, "conversation_history": []}
     session_manager.add_connection(token, websocket, user_data)
 
-    # Load saved config for this user
+    # Send initial connection success message
+    await websocket.send_json({
+        "type": "status", 
+        "message": "Connected successfully"
+    })
+
+    # Load saved config for this user if available
     saved = config_manager.load_config()
     if saved:
         await websocket.send_json({"type": "saved_config", "config": saved})
@@ -929,76 +972,133 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
     try:
         while True:
             data = await websocket.receive_json()
+            logger.info(f"WebSocket message received from {email}: {data['type']}")
+
             # Process messages for this specific session
             if data["type"] == "config":
                 try:
                     config_data = data["config"]
-                    logger.info(f"Received config data keys: {config_data.keys()}")
+                    logger.info(f"Received config data from {email}, keys: {config_data.keys()}")
+                    
+                    # Validate required fields
+                    required_fields = ["system_prompt", "reference_audio_path", "reference_text", "model_path", "llm_path"]
+                    for field in required_fields:
+                        if field not in config_data:
+                            await websocket.send_json({
+                                "type": "error", 
+                                "message": f"Missing required field: {field}"
+                            })
+                            continue
+                    
                     for key in ["reference_audio_path", "reference_audio_path2", "reference_audio_path3",
                                 "reference_text", "reference_text2", "reference_text3"]:
                         if key in config_data:
                             logger.info(f"Config includes {key}: {config_data[key]}")
                         else:
                             logger.warning(f"Config missing {key}")
+                    
                     conf = CompanionConfig(**config_data)
                     saved = config_manager.save_config(config_data)
                     if saved:
                         initialize_models(conf)
-                        await websocket.send_json({"type": "status", "message": "Models initialized and configuration saved"})
+                        await websocket.send_json({
+                            "type": "status", 
+                            "message": "Models initialized and configuration saved"
+                        })
                     else:
-                        await websocket.send_json({"type": "error", "message": "Failed to save configuration"})
+                        await websocket.send_json({
+                            "type": "error", 
+                            "message": "Failed to save configuration"
+                        })
                 except Exception as e:
-                    logger.error(f"Error processing config: {str(e)}")
-                    await websocket.send_json({"type": "error", "message": f"Configuration error: {str(e)}"})
+                    logger.error(f"Error processing config from {email}: {str(e)}")
+                    await websocket.send_json({
+                        "type": "error", 
+                        "message": f"Configuration error: {str(e)}"
+                    })
 
             elif data["type"] == "request_saved_config":
                 saved = config_manager.load_config()
-                await websocket.send_json({"type": "saved_config", "config": saved})
+                if saved:
+                    await websocket.send_json({"type": "saved_config", "config": saved})
+                else:
+                    await websocket.send_json({
+                        "type": "status", 
+                        "message": "No saved configuration found"
+                    })
+
             elif data["type"] == "text_message":
                 user_text = data["text"]
                 session_id = data.get("session_id", "default")
 
-                logger.info(f"TEXT-MSG from client: {user_text!r}")
+                logger.info(f"TEXT-MSG from {email}: {user_text!r}")
+                
                 if is_speaking:
                     with user_input_lock:
                         if len(pending_user_inputs) >= 3:
                             pending_user_inputs = pending_user_inputs[-2:]
                         pending_user_inputs.append((user_text, session_id))
-                    await websocket.send_json(
-                        {"type": "status", "message": "Queued – I'll answer in a moment"})
+                    
+                    await websocket.send_json({
+                        "type": "status", 
+                        "message": "Queued – I'll answer in a moment"
+                    })
                     continue
+                
                 await message_queue.put({"type": "transcription", "text": user_text})
                 threading.Thread(
                     target=lambda: process_user_input(user_text, session_id),
-                    daemon=True).start()
+                    daemon=True
+                ).start()
+
             elif data["type"] == "audio":
-                audio_data = np.asarray(data["audio"], dtype=np.float32)
-                sample_rate = data["sample_rate"]
-                if sample_rate != 16000:
-                    audio_tensor = torch.tensor(audio_data).unsqueeze(0)
-                    audio_tensor = torchaudio.functional.resample(
-                        audio_tensor, orig_freq=sample_rate, new_freq=16000
-                    )
-                    audio_data = audio_tensor.squeeze(0).numpy()
-                    sample_rate = 16000
-                if config and config.vad_enabled and vad_processor:
-                    vad_processor.process_audio(audio_data)
-                else:
-                    text = transcribe_audio(audio_data, sample_rate)
-                    await websocket.send_json({"type": "transcription", "text": text})
-                    await message_queue.put({"type": "transcription", "text": text})
-                    if is_speaking:
-                        with user_input_lock:
-                            pending_user_inputs.append((text, "default"))
+                try:
+                    audio_data = np.asarray(data["audio"], dtype=np.float32)
+                    sample_rate = data["sample_rate"]
+                    
+                    if sample_rate != 16000:
+                        audio_tensor = torch.tensor(audio_data).unsqueeze(0)
+                        audio_tensor = torchaudio.functional.resample(
+                            audio_tensor, orig_freq=sample_rate, new_freq=16000
+                        )
+                        audio_data = audio_tensor.squeeze(0).numpy()
+                        sample_rate = 16000
+                    
+                    if config and config.vad_enabled and vad_processor:
+                        vad_processor.process_audio(audio_data)
                     else:
-                        process_user_input(text)
+                        text = transcribe_audio(audio_data, sample_rate)
+                        await websocket.send_json({
+                            "type": "transcription", 
+                            "text": text
+                        })
+                        await message_queue.put({
+                            "type": "transcription", 
+                            "text": text
+                        })
+                        
+                        if is_speaking:
+                            with user_input_lock:
+                                pending_user_inputs.append((text, "default"))
+                        else:
+                            process_user_input(text)
+                except Exception as e:
+                    logger.error(f"Audio processing error for {email}: {e}")
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Failed to process audio"
+                    })
+
             elif data["type"] == "interrupt":
-                logger.info("Explicit interrupt request received")
+                logger.info(f"Explicit interrupt request from {email}")
+                success = handle_interrupt(websocket)
+                
                 await websocket.send_json({
                     "type": "audio_status",
-                    "status": "interrupt_acknowledged"
+                    "status": "interrupt_acknowledged",
+                    "success": success
                 })
-                success = handle_interrupt(websocket)
+                
                 if success:
                     await asyncio.sleep(0.3)
                     with user_input_lock:
@@ -1009,17 +1109,45 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                                 target=lambda: process_user_input(user_text, session_id),
                                 daemon=True
                             ).start()
-                await websocket.send_json({
-                    "type": "audio_status",
-                    "status": "interrupted",
-                    "success": success
-                })
+
             elif data["type"] == "mute":
-                await websocket.send_json({"type": "mute_status", "muted": data["muted"]})
-                if not data["muted"] and config and config.vad_enabled and vad_processor:
+                muted = data.get("muted", False)
+                await websocket.send_json({
+                    "type": "mute_status", 
+                    "muted": muted
+                })
+                if not muted and config and config.vad_enabled and vad_processor:
                     vad_processor.reset()
+
+            elif data["type"] == "ping":
+                # Handle keep-alive ping
+                await websocket.send_json({
+                    "type": "pong"
+                })
+
+            else:
+                logger.warning(f"Unknown message type from {email}: {data['type']}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Unknown message type: {data['type']}"
+                })
+
     except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for {email}")
+        if websocket in active_connections:
+            active_connections.remove(websocket)
         session_manager.remove_connection(token, websocket)
+        
+    except Exception as e:
+        logger.error(f"WebSocket error for {email}: {e}")
+        if websocket in active_connections:
+            active_connections.remove(websocket)
+        session_manager.remove_connection(token, websocket)
+        try:
+            await websocket.close(code=1011)  # Internal error
+        except:
+            pass
+
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -1033,14 +1161,59 @@ async def login_page(request: Request):
 async def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
 
-# Protected routes
+# Update your protected routes to handle authentication properly
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request, current_user: User = Depends(get_current_user)):
     return templates.TemplateResponse("chat.html", {"request": request, "user": current_user.email})
 
-@app.get("/setup", response_class=HTMLResponse)
-async def setup_page(request: Request, current_user: User = Depends(get_current_user)):
-    return templates.TemplateResponse("setup.html", {"request": request, "user": current_user.email})
+
+
+# Update the security scheme to handle both header and query parameters
+class HTTPBearerOptional(HTTPBearer):
+    async def __call__(self, request: Request):
+        # First try to get token from header
+        try:
+            return await super().__call__(request)
+        except HTTPException:
+            # If header fails, try to get from query parameter
+            token = request.query_params.get("token")
+            if token:
+                return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+            raise
+
+security = HTTPBearerOptional()
+
+
+# Update the get_current_user function to handle both methods
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+        token_data = TokenData(email=email)
+    except JWTError:
+        raise credentials_exception
+
+    db = SessionLocal()
+    user = get_user_by_email(db, email=email)
+    db.close()
+
+    if user is None:
+        raise credentials_exception
+    return user
+
+# Add a simple root redirect
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/login")
+
+
 
 # Authentication routes
 @app.post("/token")
@@ -1200,9 +1373,11 @@ def create_html_templates():
 </html>
         """)
 
-    # Create register page
-    with open("templates/register.html", "w") as f:
-        f.write("""
+
+
+# In the create_html_templates function, update register.html:
+with open("templates/register.html", "w") as f:
+    f.write("""
 <!DOCTYPE html>
 <html>
 <head>
@@ -1211,13 +1386,33 @@ def create_html_templates():
         body { font-family: Arial, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; }
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; }
-        input[type="email"], input[type="password"] { width: 100%; padding: 8px; box-sizing: border-box; }
-        button { background: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; }
-        .login-link { margin-top: 10px; }
+        input[type="email"], input[type="password"] { 
+            width: 100%; 
+            padding: 10px; 
+            box-sizing: border-box; 
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button { 
+            background: #007bff; 
+            color: white; 
+            padding: 12px 20px; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            width: 100%;
+            font-size: 16px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        .login-link { margin-top: 20px; text-align: center; }
+        #message { margin-top: 15px; padding: 10px; border-radius: 5px; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     </style>
 </head>
 <body>
-    <h2>Register</h2>
+    <h2 style="text-align: center;">Register</h2>
     <form id="registerForm">
         <div class="form-group">
             <label for="email">Email:</label>
@@ -1225,9 +1420,9 @@ def create_html_templates():
         </div>
         <div class="form-group">
             <label for="password">Password:</label>
-            <input type="password" id="password" required>
+            <input type="password" id="password" required minlength="6">
         </div>
-        <button type="submit">Register</button>
+        <button type="submit" id="submit-btn">Register</button>
     </form>
     <div class="login-link">
         <p>Already have an account? <a href="/login">Login here</a></p>
@@ -1237,8 +1432,16 @@ def create_html_templates():
     <script>
         document.getElementById('registerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            const submitBtn = document.getElementById('submit-btn');
+            const messageDiv = document.getElementById('message');
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
+
+            // Clear previous messages
+            messageDiv.innerHTML = '';
+            messageDiv.className = '';
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Registering...';
 
             try {
                 const response = await fetch('/register', {
@@ -1249,24 +1452,41 @@ def create_html_templates():
                     body: JSON.stringify({ email, password })
                 });
 
+                const result = await response.json();
+
                 if (response.ok) {
-                    const data = await response.json();
-                    localStorage.setItem('access_token', data.access_token);
-                    window.location.href = '/chat';
+                    messageDiv.textContent = 'Registration successful! Redirecting...';
+                    messageDiv.className = 'success';
+                    
+                    // Store token and redirect
+                    localStorage.setItem('access_token', result.access_token);
+                    setTimeout(() => {
+                        window.location.href = '/chat';
+                    }, 1000);
                 } else {
-                    const error = await response.json();
-                    document.getElementById('message').innerHTML = `<p style="color: red;">${error.detail}</p>`;
+                    messageDiv.textContent = result.detail || 'Registration failed';
+                    messageDiv.className = 'error';
                 }
             } catch (error) {
-                document.getElementById('message').innerHTML = '<p style="color: red;">Registration failed</p>';
+                messageDiv.textContent = 'Registration failed: Network error';
+                messageDiv.className = 'error';
+                console.error('Registration error:', error);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Register';
             }
         });
     </script>
 </body>
 </html>
-        """)
+    """)
 
-    # Create chat page with token handling
+
+
+
+def create_html_templates():
+    """Create HTML templates for the web interface"""
+    # Create chat page with proper token handling
     with open("templates/chat.html", "w") as f:
         f.write("""
 <!DOCTYPE html>
@@ -1274,75 +1494,168 @@ def create_html_templates():
 <head>
     <title>AI Companion - Chat</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-        #messages { height: 400px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
-        .message { margin: 5px 0; padding: 5px; }
-        .user { background-color: #e3f2fd; }
-        .ai { background-color: #f5f5f5; }
-        #input-form { display: flex; gap: 10px; }
-        #message-input { flex: 1; padding: 10px; }
-        button { padding: 10px 20px; }
-        #status { margin: 10px 0; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        #messages { height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; background: #fafafa; border-radius: 5px; }
+        .message { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .user { background-color: #e3f2fd; border-left: 4px solid #2196f3; }
+        .ai { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
+        .status { background-color: #fff3cd; border-left: 4px solid #ffc107; }
+        #input-form { display: flex; gap: 10px; margin-bottom: 15px; }
+        #message-input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; }
+        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        #interrupt-btn { background: #dc3545; }
+        #interrupt-btn:hover { background: #c82333; }
+        #status { margin: 15px 0; padding: 10px; border-radius: 5px; font-weight: bold; }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .logout-btn { background: #6c757d; padding: 8px 15px; font-size: 14px; }
     </style>
 </head>
 <body>
-    <h1>AI Companion Chat</h1>
-    <div id="status">Connecting...</div>
-    <div id="messages"></div>
-    <form id="input-form">
-        <input type="text" id="message-input" placeholder="Type your message..." required>
-        <button type="submit">Send</button>
-    </form>
-    <button id="interrupt-btn">Interrupt</button>
+    <div class="container">
+        <div class="header">
+            <h1>AI Companion Chat</h1>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+        <div id="status" class="disconnected">Disconnected</div>
+        <div id="messages"></div>
+        <form id="input-form">
+            <input type="text" id="message-input" placeholder="Type your message..." required>
+            <button type="submit" id="send-btn">Send</button>
+        </form>
+        <button id="interrupt-btn" disabled>Interrupt</button>
+    </div>
 
     <script>
+        let ws = null;
         const token = localStorage.getItem('access_token');
+        
         if (!token) {
             window.location.href = '/login';
-            exit;
         }
 
-        const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}/ws?token=${token}`);
+            
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('interrupt-btn').disabled = false;
+                addMessage('system', 'Connected to AI Companion');
+            };
 
-        ws.onopen = () => {
-            document.getElementById('status').textContent = 'Connected';
-        };
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                }
+            };
 
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
+            ws.onclose = () => {
+                document.getElementById('status').textContent = 'Disconnected';
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('interrupt-btn').disabled = true;
+                addMessage('system', 'Disconnected from server');
+                
+                // Attempt to reconnect after 3 seconds
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                document.getElementById('status').textContent = 'Connection error';
+            };
+        }
+
+        function handleWebSocketMessage(data) {
             const messagesDiv = document.getElementById('messages');
-
-            if (data.type === 'transcription') {
-                messagesDiv.innerHTML += `<div class="message user"><strong>You:</strong> ${data.text}</div>`;
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
-            } else if (data.type === 'response') {
-                messagesDiv.innerHTML += `<div class="message ai"><strong>AI:</strong> ${data.text}</div>`;
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            switch(data.type) {
+                case 'transcription':
+                    addMessage('user', data.text);
+                    break;
+                case 'response':
+                    addMessage('ai', data.text);
+                    break;
+                case 'status':
+                    addMessage('status', data.message);
+                    break;
+                case 'error':
+                    addMessage('status', `Error: ${data.message}`);
+                    break;
+                case 'audio_status':
+                    if (data.status === 'generating') {
+                        addMessage('status', 'AI is generating response...');
+                    } else if (data.status === 'interrupted') {
+                        addMessage('status', 'Response interrupted');
+                    }
+                    break;
+                default:
+                    console.log('Unknown message type:', data.type);
             }
-        };
+        }
 
-        document.getElementById('input-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const input = document.getElementById('message-input');
-            const message = input.value.trim();
-
-            if (message) {
-                ws.send(JSON.stringify({
-                    type: 'text_message',
-                    text: message,
-                    session_id: 'default'
-                }));
-                input.value = '';
+        function addMessage(type, text) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            let prefix = '';
+            switch(type) {
+                case 'user': prefix = '<strong>You:</strong> '; break;
+                case 'ai': prefix = '<strong>AI:</strong> '; break;
+                case 'status': prefix = '<em>System:</em> '; break;
             }
-        });
+            
+            messageDiv.innerHTML = prefix + text;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
 
-        document.getElementById('interrupt-btn').addEventListener('click', () => {
-            ws.send(JSON.stringify({ type: 'interrupt' }));
+        function logout() {
+            localStorage.removeItem('access_token');
+            if (ws) {
+                ws.close();
+            }
+            window.location.href = '/login';
+        }
+
+        // Initialize connection when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            connectWebSocket();
+            
+            document.getElementById('input-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const input = document.getElementById('message-input');
+                const message = input.value.trim();
+
+                if (message && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'text_message',
+                        text: message,
+                        session_id: 'default'
+                    }));
+                    input.value = '';
+                }
+            });
+
+            document.getElementById('interrupt-btn').addEventListener('click', () => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'interrupt' }));
+                }
+            });
         });
     </script>
 </body>
 </html>
         """)
+
 
     # Redirect root to login
     with open("templates/index.html", "w") as f:
@@ -1362,8 +1675,28 @@ async def process_message_queue():
         message_queue.task_done()
 
 @app.get("/setup", response_class=HTMLResponse)
-async def setup_page_unprotected(request: Request):
-    return templates.TemplateResponse("setup.html", {"request": request})
+async def setup_page(request: Request, current_user: User = Depends(get_current_user)):
+    return templates.TemplateResponse("setup.html", {"request": request, "user": current_user.email})
+
+
+@app.get("/debug/user")
+async def debug_user(current_user: User = Depends(get_current_user)):
+    """Debug endpoint to verify user authentication"""
+    return {
+        "email": current_user.email,
+        "id": current_user.id,
+        "authenticated": True
+    }
+
+@app.get("/debug/token")
+async def debug_token(token: str = Depends(security)):
+    """Debug endpoint to verify token"""
+    try:
+        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        return {"valid": True, "email": payload.get("sub")}
+    except JWTError as e:
+        return {"valid": False, "error": str(e)}
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
