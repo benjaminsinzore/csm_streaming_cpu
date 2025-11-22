@@ -905,6 +905,103 @@ def handle_interrupt(websocket):
     return False
 
 
+# Update the security scheme to handle both header and query parameters
+
+class HTTPBearerOptional(HTTPBearer):
+    async def __call__(self, request: Request):
+        # Try to get token from header first
+        try:
+            return await super().__call__(request)
+        except HTTPException:
+            # If header fails, try to get from query parameter
+            token = request.query_params.get("token")
+            if token:
+                return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+            # If query parameter fails, try to get from cookie
+            token = request.cookies.get("access_token")
+            if token:
+                return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+            raise
+
+security = HTTPBearerOptional()
+
+
+def get_current_user_optional(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Optional authentication - returns user if authenticated, None otherwise"""
+    if credentials is None:
+        return None
+        
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            return None
+            
+        db = SessionLocal()
+        user = get_user_by_email(db, email)
+        db.close()
+        
+        return user
+    except JWTError:
+        return None
+    
+
+
+
+
+def get_current_user_required(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Required authentication - raises exception if not authenticated"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    if credentials is None:
+        raise credentials_exception
+        
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+            
+        db = SessionLocal()
+        user = get_user_by_email(db, email)
+        db.close()
+
+        if user is None:
+            raise credentials_exception
+        return user
+    except JWTError:
+        raise credentials_exception
+    
+
+
+# Update the get_current_user function to handle both methods
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+        token_data = TokenData(email=email)
+    except JWTError:
+        raise credentials_exception
+
+    db = SessionLocal()
+    user = get_user_by_email(db, email=email)
+    db.close()
+
+    if user is None:
+        raise credentials_exception
+    return user
+
 
 
 @app.websocket("/ws")
@@ -1183,102 +1280,6 @@ async def chat_page(request: Request, current_user: User = Depends(get_current_u
     })
 
 
-# Update the security scheme to handle both header and query parameters
-
-class HTTPBearerOptional(HTTPBearer):
-    async def __call__(self, request: Request):
-        # Try to get token from header first
-        try:
-            return await super().__call__(request)
-        except HTTPException:
-            # If header fails, try to get from query parameter
-            token = request.query_params.get("token")
-            if token:
-                return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-            # If query parameter fails, try to get from cookie
-            token = request.cookies.get("access_token")
-            if token:
-                return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-            raise
-
-security = HTTPBearerOptional()
-
-
-def get_current_user_optional(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Optional authentication - returns user if authenticated, None otherwise"""
-    if credentials is None:
-        return None
-        
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            return None
-            
-        db = SessionLocal()
-        user = get_user_by_email(db, email)
-        db.close()
-        
-        return user
-    except JWTError:
-        return None
-    
-
-
-
-
-def get_current_user_required(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Required authentication - raises exception if not authenticated"""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    
-    if credentials is None:
-        raise credentials_exception
-        
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-            
-        db = SessionLocal()
-        user = get_user_by_email(db, email)
-        db.close()
-
-        if user is None:
-            raise credentials_exception
-        return user
-    except JWTError:
-        raise credentials_exception
-    
-
-
-# Update the get_current_user function to handle both methods
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-        token_data = TokenData(email=email)
-    except JWTError:
-        raise credentials_exception
-
-    db = SessionLocal()
-    user = get_user_by_email(db, email=email)
-    db.close()
-
-    if user is None:
-        raise credentials_exception
-    return user
 
 # Add a simple root redirect
 @app.get("/")
