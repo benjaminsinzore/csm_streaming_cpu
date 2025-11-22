@@ -1012,7 +1012,7 @@ async def setup_page(request: Request, current_user: User = Depends(get_current_
 
 # Authentication routes
 @app.post("/token")
-async def login_for_access_token(form_ UserLogin):
+async def login_for_access_token(form_data: UserLogin):
     db = SessionLocal()
     user = authenticate_user(db, form_data.email, form_data.password)
     db.close()
@@ -1027,7 +1027,7 @@ async def login_for_access_token(form_ UserLogin):
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/register")
-async def register_user(user_ UserCreate):
+async def register_user(user_data: UserCreate):
     db = SessionLocal()
     
     # Check if user already exists
