@@ -207,7 +207,7 @@ class SessionManager:
     def __init__(self):
         self.sessions = {}  # {token: {'connections': [], 'user_data': {}}}
 
-    def add_connection(self, token: str, websocket, user_ dict):
+    def add_connection(self, token: str, websocket, user_data: dict):
         if token not in self.sessions:
             self.sessions[token] = {'connections': [], 'user_data': user_data}
         self.sessions[token]['connections'].append(websocket)
