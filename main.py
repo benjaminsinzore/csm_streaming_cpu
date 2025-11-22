@@ -877,6 +877,7 @@ def handle_interrupt(websocket):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str = None):
+    global config, vad_processor # Move global declarations to the start of the function
     if not token:
         await websocket.close(code=1008)  # Policy violation
         return
@@ -958,7 +959,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                     )
                     audio_data = audio_tensor.squeeze(0).numpy()
                     sample_rate = 16000
-                global config, vad_processor # Access global config and vad_processor
+                # global config, vad_processor # Remove this line - it's now at the function start
                 if config and config.vad_enabled and vad_processor: # Check if vad_processor is loaded
                     vad_processor.process_audio(audio_data)
                 else:
@@ -994,12 +995,13 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                 })
             elif data["type"] == "mute":
                 await websocket.send_json({"type": "mute_status", "muted": data["muted"]})
-                global config, vad_processor # Access global config and vad_processor
+                # global config, vad_processor # Remove this line - it's now at the function start
                 if not data["muted"] and config and config.vad_enabled and vad_processor: # Check if vad_processor is loaded
                     vad_processor.reset()
     except WebSocketDisconnect:
         session_manager.remove_connection(token, websocket)
-        
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return RedirectResponse(url="/login")
