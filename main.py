@@ -38,6 +38,14 @@ from jose import JWTError, jwt
 from pathlib import Path
 
 
+from fastapi.responses import RedirectResponse
+
+from fastapi import Response
+
+from fastapi import Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jose import JWTError, jwt
+
 
 from fastapi import HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -1163,15 +1171,23 @@ async def register_page(request: Request):
 
 # Update your protected routes to handle authentication properly
 @app.get("/chat", response_class=HTMLResponse)
-async def chat_page(request: Request, current_user: User = Depends(get_current_user)):
-    return templates.TemplateResponse("chat.html", {"request": request, "user": current_user.email})
-
+async def chat_page(request: Request, current_user: User = Depends(get_current_user_optional)):
+    # If user is not authenticated, redirect to login
+    if not current_user:
+        return RedirectResponse(url="/login")
+    
+    return templates.TemplateResponse("chat.html", {
+        "request": request, 
+        "user": current_user.email,
+        "token": create_access_token(data={"sub": current_user.email})  # Pass token to template
+    })
 
 
 # Update the security scheme to handle both header and query parameters
+
 class HTTPBearerOptional(HTTPBearer):
     async def __call__(self, request: Request):
-        # First try to get token from header
+        # Try to get token from header first
         try:
             return await super().__call__(request)
         except HTTPException:
@@ -1179,9 +1195,65 @@ class HTTPBearerOptional(HTTPBearer):
             token = request.query_params.get("token")
             if token:
                 return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+            # If query parameter fails, try to get from cookie
+            token = request.cookies.get("access_token")
+            if token:
+                return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
             raise
 
 security = HTTPBearerOptional()
+
+
+def get_current_user_optional(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Optional authentication - returns user if authenticated, None otherwise"""
+    if credentials is None:
+        return None
+        
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            return None
+            
+        db = SessionLocal()
+        user = get_user_by_email(db, email)
+        db.close()
+        
+        return user
+    except JWTError:
+        return None
+    
+
+
+
+
+def get_current_user_required(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Required authentication - raises exception if not authenticated"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    if credentials is None:
+        raise credentials_exception
+        
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+            
+        db = SessionLocal()
+        user = get_user_by_email(db, email)
+        db.close()
+
+        if user is None:
+            raise credentials_exception
+        return user
+    except JWTError:
+        raise credentials_exception
+    
 
 
 # Update the get_current_user function to handle both methods
@@ -1216,8 +1288,9 @@ async def root():
 
 
 # Authentication routes
+
 @app.post("/token")
-async def login_for_access_token(form_data: UserLogin):
+async def login_for_access_token(response: Response, form_data: UserLogin):
     db = SessionLocal()
     user = authenticate_user(db, form_data.email, form_data.password)
     db.close()
@@ -1229,10 +1302,24 @@ async def login_for_access_token(form_data: UserLogin):
         )
 
     access_token = create_access_token(data={"sub": user.email})
+    
+    # Set the token as a cookie for browser requests
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        max_age=30 * 60,  # 30 minutes
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax"
+    )
+    
     return {"access_token": access_token, "token_type": "bearer"}
 
+
+
+
 @app.post("/register")
-async def register_user(user_data: UserCreate):
+async def register_user(response: Response, user_data: UserCreate):
     db = SessionLocal()
 
     # Check if user already exists
@@ -1250,7 +1337,21 @@ async def register_user(user_data: UserCreate):
 
     # Create access token
     access_token = create_access_token(data={"sub": user.email})
+    
+    # Set the token as a cookie for browser requests
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        max_age=30 * 60,  # 30 minutes
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax"
+    )
+    
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -1307,73 +1408,232 @@ async def startup_event():
 
 def create_html_templates():
     """Create HTML templates for the web interface"""
-    # Create login page
-    with open("templates/login.html", "w") as f:
+    
+    # Update chat.html to handle authentication properly
+    with open("templates/chat.html", "w") as f:
         f.write("""
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Login</title>
+    <title>AI Companion - Chat</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; }
-        input[type="email"], input[type="password"] { width: 100%; padding: 8px; box-sizing: border-box; }
-        button { background: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; }
-        .register-link { margin-top: 10px; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        #messages { height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; background: #fafafa; border-radius: 5px; }
+        .message { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .user { background-color: #e3f2fd; border-left: 4px solid #2196f3; }
+        .ai { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
+        .status { background-color: #fff3cd; border-left: 4px solid #ffc107; }
+        #input-form { display: flex; gap: 10px; margin-bottom: 15px; }
+        #message-input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; }
+        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        #interrupt-btn { background: #dc3545; }
+        #interrupt-btn:hover { background: #c82333; }
+        #status { margin: 15px 0; padding: 10px; border-radius: 5px; font-weight: bold; }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .logout-btn { background: #6c757d; padding: 8px 15px; font-size: 14px; }
+        .auth-error { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 5px; margin: 20px 0; }
     </style>
 </head>
 <body>
-    <h2>Login</h2>
-    <form id="loginForm">
-        <div class="form-group">
-            <label for="email">Email:</label>
-            <input type="email" id="email" required>
+    <div class="container">
+        <div class="header">
+            <h1>AI Companion Chat</h1>
+            <button class="logout-btn" onclick="logout()">Logout</button>
         </div>
-        <div class="form-group">
-            <label for="password">Password:</label>
-            <input type="password" id="password" required>
-        </div>
-        <button type="submit">Login</button>
-    </form>
-    <div class="register-link">
-        <p>Don't have an account? <a href="/register">Register here</a></p>
+        
+        <div id="auth-status"></div>
+        <div id="status" class="disconnected">Disconnected</div>
+        <div id="messages"></div>
+        <form id="input-form">
+            <input type="text" id="message-input" placeholder="Type your message..." required>
+            <button type="submit" id="send-btn">Send</button>
+        </form>
+        <button id="interrupt-btn" disabled>Interrupt</button>
     </div>
-    <div id="message"></div>
 
     <script>
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-
-            try {
-                const response = await fetch('/token', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ email, password })
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    localStorage.setItem('access_token', data.access_token);
-                    window.location.href = '/chat';
-                } else {
-                    const error = await response.json();
-                    document.getElementById('message').innerHTML = `<p style="color: red;">${error.detail}</p>`;
-                }
-            } catch (error) {
-                document.getElementById('message').innerHTML = '<p style="color: red;">Login failed</p>';
+        // Get token from multiple sources
+        function getToken() {
+            // Try localStorage first
+            let token = localStorage.getItem('access_token');
+            if (token) return token;
+            
+            // Try to extract token from URL query parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            token = urlParams.get('token');
+            if (token) {
+                localStorage.setItem('access_token', token);
+                return token;
             }
+            
+            // For cookies, we rely on the browser automatically sending them
+            return null;
+        }
+
+        let ws = null;
+        const token = getToken();
+        
+        function showAuthError(message) {
+            const authStatus = document.getElementById('auth-status');
+            authStatus.innerHTML = `<div class="auth-error">
+                <strong>Authentication Error:</strong> ${message}
+                <div style="margin-top: 10px;">
+                    <button onclick="window.location.href='/login'">Go to Login</button>
+                </div>
+            </div>`;
+            
+            // Disable inputs
+            document.getElementById('input-form').style.display = 'none';
+            document.getElementById('interrupt-btn').style.display = 'none';
+        }
+
+        if (!token) {
+            showAuthError('No authentication token found. Please login again.');
+        }
+
+        function connectWebSocket() {
+            if (!token) {
+                showAuthError('Cannot connect: No authentication token');
+                return;
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('interrupt-btn').disabled = false;
+                document.getElementById('auth-status').innerHTML = '';
+                addMessage('system', 'Connected to AI Companion');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                }
+            };
+
+            ws.onclose = (event) => {
+                document.getElementById('status').textContent = 'Disconnected';
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('interrupt-btn').disabled = true;
+                addMessage('system', 'Disconnected from server');
+                
+                if (event.code === 1008) { // Policy violation - authentication error
+                    showAuthError('Authentication failed. Please login again.');
+                } else {
+                    // Attempt to reconnect after 3 seconds
+                    setTimeout(connectWebSocket, 3000);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                document.getElementById('status').textContent = 'Connection error';
+            };
+        }
+
+        function handleWebSocketMessage(data) {
+            const messagesDiv = document.getElementById('messages');
+            
+            switch(data.type) {
+                case 'transcription':
+                    addMessage('user', data.text);
+                    break;
+                case 'response':
+                    addMessage('ai', data.text);
+                    break;
+                case 'status':
+                    addMessage('status', data.message);
+                    break;
+                case 'error':
+                    if (data.message.includes('auth') || data.message.includes('token')) {
+                        showAuthError(data.message);
+                    } else {
+                        addMessage('status', `Error: ${data.message}`);
+                    }
+                    break;
+                case 'audio_status':
+                    if (data.status === 'generating') {
+                        addMessage('status', 'AI is generating response...');
+                    } else if (data.status === 'interrupted') {
+                        addMessage('status', 'Response interrupted');
+                    }
+                    break;
+                default:
+                    console.log('Unknown message type:', data.type);
+            }
+        }
+
+        function addMessage(type, text) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            let prefix = '';
+            switch(type) {
+                case 'user': prefix = '<strong>You:</strong> '; break;
+                case 'ai': prefix = '<strong>AI:</strong> '; break;
+                case 'status': prefix = '<em>System:</em> '; break;
+            }
+            
+            messageDiv.innerHTML = prefix + text;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function logout() {
+            localStorage.removeItem('access_token');
+            // Clear cookie by setting expired date
+            document.cookie = "access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            if (ws) {
+                ws.close();
+            }
+            window.location.href = '/login';
+        }
+
+        // Initialize connection when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            if (token) {
+                connectWebSocket();
+            }
+            
+            document.getElementById('input-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const input = document.getElementById('message-input');
+                const message = input.value.trim();
+
+                if (message && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'text_message',
+                        text: message,
+                        session_id: 'default'
+                    }));
+                    input.value = '';
+                }
+            });
+
+            document.getElementById('interrupt-btn').addEventListener('click', () => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'interrupt' }));
+                }
+            });
         });
     </script>
 </body>
 </html>
         """)
-
-
 
 # In the create_html_templates function, update register.html:
 with open("templates/register.html", "w") as f:
@@ -1675,9 +1935,15 @@ async def process_message_queue():
         message_queue.task_done()
 
 @app.get("/setup", response_class=HTMLResponse)
-async def setup_page(request: Request, current_user: User = Depends(get_current_user)):
-    return templates.TemplateResponse("setup.html", {"request": request, "user": current_user.email})
-
+async def setup_page(request: Request, current_user: User = Depends(get_current_user_optional)):
+    # If user is not authenticated, redirect to login
+    if not current_user:
+        return RedirectResponse(url="/login")
+    
+    return templates.TemplateResponse("setup.html", {
+        "request": request, 
+        "user": current_user.email
+    })
 
 @app.get("/debug/user")
 async def debug_user(current_user: User = Depends(get_current_user)):
@@ -1702,6 +1968,21 @@ async def debug_token(token: str = Depends(security)):
 async def shutdown_event():
     logger.info("Server shutting down...")
     model_thread_running.clear()
+
+
+@app.post("/logout")
+async def logout(response: Response):
+    # Clear the cookie
+    response.delete_cookie("access_token")
+    return {"message": "Logged out successfully"}
+
+@app.get("/logout")
+async def logout_page(response: Response):
+    # Clear the cookie and redirect to login
+    response = RedirectResponse(url="/login")
+    response.delete_cookie("access_token")
+    return response
+    
 
 @app.get("/api/conversations")
 async def get_conversations(request: Request):
