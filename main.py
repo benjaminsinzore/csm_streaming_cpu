@@ -250,15 +250,22 @@ def authenticate_user(db, email: str, password: str):
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
+    
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    # Use integer timestamp for JWT expiration
+    # Use proper datetime object for expiration
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    
+    try:
+        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        logger.info(f"Created token expiring at: {expire}")
+        return encoded_jwt
+    except Exception as e:
+        logger.error(f"Error creating token: {e}")
+        raise
 
 
 
@@ -1345,8 +1352,10 @@ async def login_for_access_token(response: Response, form_data: UserLogin):
             detail="Incorrect email or password"
         )
 
-    # Create token with proper expiration
+    # Create a fresh token with proper expiration
     access_token = create_access_token(data={"sub": user.email})
+    
+    logger.info(f"Login successful for {user.email}, token created")
     
     # Set the token as a cookie
     response.set_cookie(
@@ -1377,8 +1386,10 @@ async def register_user(response: Response, user_data: UserCreate):
     user = create_user(db, user_data.email, user_data.password)
     db.close()
 
-    # Create token with proper expiration
+    # Create a fresh token with proper expiration
     access_token = create_access_token(data={"sub": user.email})
+    
+    logger.info(f"Registration successful for {user.email}, token created")
     
     # Set the token as a cookie
     response.set_cookie(
@@ -1391,6 +1402,8 @@ async def register_user(response: Response, user_data: UserCreate):
     )
     
     return {"access_token": access_token, "token_type": "bearer"}
+
+
 
 
 @app.on_event("startup")
@@ -2012,6 +2025,10 @@ async def logout(response: Response):
     # Clear the cookie
     response.delete_cookie("access_token")
     return {"message": "Logged out successfully"}
+
+@app.get("/api/debug/token")
+async def debug_token(current_user: User = Depends(get_current_user_required)):
+    return {"status": "valid", "email": current_user.email}
 
 @app.get("/logout")
 async def logout_page(response: Response):

@@ -137,6 +137,20 @@
             document.getElementById('success-message').textContent = 'Registration successful! Please login.';
             document.getElementById('success-message').style.display = 'block';
         }
+
+
+        // Clear any old tokens when arriving at login page
+        document.addEventListener('DOMContentLoaded', function() {
+            localStorage.removeItem('access_token');
+            console.log('Cleared tokens on login page');
+            
+            // Check if we were redirected due to token expiration
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('message') === 'session_expired') {
+                document.getElementById('error-message').textContent = 'Your session has expired. Please login again.';
+                document.getElementById('error-message').style.display = 'block';
+            }
+        });
     </script>
 </body>
 </html>
