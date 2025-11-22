@@ -135,23 +135,16 @@ class CompanionConfig(BaseModel):
     vad_threshold: float = 0.5
     embedding_model: str = "all-MiniLM-L6-v2"
 
-# Global variables for models
-whisper_pipe = None
-generator = None
-llm = None
-rag = None
-vad_processor = None
-config = None
-reference_segments = []
-conversation_history = []
-models_loaded = threading.Event()
-
 # User authentication functions
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    # Truncate plain_password before verifying if needed
+    truncated_password = plain_password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+    return pwd_context.verify(truncated_password, hashed_password)
 
 def get_password_hash(password):
-    return pwd_context.hash(password)
+    # Truncate password before hashing if needed
+    truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+    return pwd_context.hash(truncated_password)
 
 def create_user(db, email: str, password: str):
     hashed_password = get_password_hash(password)
@@ -166,11 +159,17 @@ def get_user_by_email(db, email: str):
 
 def authenticate_user(db, email: str, password: str):
     user = get_user_by_email(db, email)
-    if not user or not verify_password(password, user.hashed_password):
+    if not user:
+        # To prevent timing attacks, we should still call verify_password even if user doesn't exist
+        verify_password("dummy_password", "dummy_hash") # Simulate verification time
+        return None
+    # Truncate the provided password before verifying
+    truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+    if not verify_password(truncated_password, user.hashed_password):
         return None
     return user
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
+def create_access_token( dict, expires_delta: timedelta = None):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now() + expires_delta
@@ -194,11 +193,11 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         token_data = TokenData(email=email)
     except JWTError:
         raise credentials_exception
-    
+
     db = SessionLocal()
     user = get_user_by_email(db, email=email)
     db.close()
-    
+
     if user is None:
         raise credentials_exception
     return user
@@ -207,28 +206,38 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 class SessionManager:
     def __init__(self):
         self.sessions = {}  # {token: {'connections': [], 'user_data': {}}}
-    
-    def add_connection(self, token: str, websocket, user_data: dict):
+
+    def add_connection(self, token: str, websocket, user_ dict):
         if token not in self.sessions:
             self.sessions[token] = {'connections': [], 'user_data': user_data}
         self.sessions[token]['connections'].append(websocket)
-    
+
     def remove_connection(self, token: str, websocket):
         if token in self.sessions:
             self.sessions[token]['connections'].remove(websocket)
             if not self.sessions[token]['connections']:
                 del self.sessions[token]
-    
+
     def get_user_connections(self, token: str):
         return self.sessions.get(token, {}).get('connections', [])
 
 session_manager = SessionManager()
 
-# ... [your existing global variables remain the same] ...
+# Global variables for models - declared here but initialized in startup_event
+whisper_model = None
+processor = None
+whisper_pipe = None
+generator = None
+llm = None
+rag = None
+vad_processor = None
+config = None # Global config instance
 
+conversation_history = []
 audio_queue = queue.Queue()
 is_speaking = False
 interrupt_flag = threading.Event()
+reference_segments = []
 active_connections = []
 message_queue = asyncio.Queue()
 
@@ -241,135 +250,52 @@ templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
 
 ### NEW CODE FROM THIS POINT
+model_id = "openai/whisper-large-v3-turbo"
 
-def load_whisper_model():
-    """Load Whisper model for speech recognition"""
-    global whisper_pipe
-    logger.info("Loading Whisper model...")
-    
-    model_id = "openai/whisper-large-v3-turbo"
+# Find the exact snapshot path
+cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
+model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
 
-    # Find the exact snapshot path
-    cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
-    model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
+# Get all snapshots and use the first one
+snapshots = list(model_cache_dir.iterdir())
+if not snapshots:
+    raise ValueError("No model snapshots found in cache!")
 
-    # Get all snapshots and use the first one
-    snapshots = list(model_cache_dir.iterdir())
-    if not snapshots:
-        raise ValueError("No model snapshots found in cache!")
+# Use the first snapshot (usually the only one or most recent)
+snapshot_path = snapshots[0]
+print(f"Using model from: {snapshot_path}")
 
-    # Use the first snapshot (usually the only one or most recent)
-    snapshot_path = snapshots[0]
-    logger.info(f"Using Whisper model from: {snapshot_path}")
+# Verify config.json exists
+config_path = snapshot_path / "config.json"
+if not config_path.exists():
+    raise FileNotFoundError(f"config.json not found at {config_path}")
 
-    # Verify config.json exists
-    config_path = snapshot_path / "config.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"config.json not found at {config_path}")
+# Load using the direct local path
+model_id = str(snapshot_path)
 
-    # Load using the direct local path
-    model_id = str(snapshot_path)
+whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+    model_id,
+    torch_dtype=torch.float32,
+    low_cpu_mem_usage=True,
+    use_safetensors=True,
+    local_files_only=True
+)
+whisper_model.to("cpu")
 
-    whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        model_id,
-        torch_dtype=torch.float32, 
-        low_cpu_mem_usage=True, 
-        use_safetensors=True,
-        local_files_only=True
-    )
-    whisper_model.to("cpu")
+processor = AutoProcessor.from_pretrained(
+    model_id,
+    local_files_only=True
+)
 
-    processor = AutoProcessor.from_pretrained(
-        model_id,
-        local_files_only=True
-    )
-
-    whisper_pipe = pipeline(
-        "automatic-speech-recognition",
-        model=whisper_model,
-        tokenizer=processor.tokenizer,
-        feature_extractor=processor.feature_extractor,
-        torch_dtype=torch.float32,
-        device=-1,
-    )
-    logger.info("Whisper model loaded successfully")
-
-def load_default_models():
-    """Load default models with a basic configuration"""
-    global generator, llm, rag, vad_processor, config, models_loaded
-    
-    try:
-        logger.info("Starting model loading process...")
-        
-        # Load Whisper first
-        load_whisper_model()
-        
-        # Create a default configuration
-        default_config = CompanionConfig(
-            system_prompt="You are a helpful AI assistant.",
-            reference_audio_path="",
-            reference_text="",
-            model_path="path/to/your/model",  # You'll need to set this
-            llm_path="path/to/your/llm",     # You'll need to set this
-            voice_speaker_id=0,
-            vad_enabled=True,
-            vad_threshold=0.5,
-            embedding_model="all-MiniLM-L6-v2"
-        )
-        config = default_config
-        
-        # Load other models
-        logger.info("Loading LLM...")
-        try:
-            llm = LLMInterface(config.llm_path, config.max_tokens)
-            logger.info("LLM loaded successfully")
-        except Exception as e:
-            logger.warning(f"Could not load LLM: {e}")
-            llm = None
-            
-        logger.info("Loading RAG system...")
-        try:
-            rag = RAGSystem("companion.db", model_name=config.embedding_model)
-            logger.info("RAG system loaded successfully")
-        except Exception as e:
-            logger.warning(f"Could not load RAG system: {e}")
-            rag = None
-            
-        logger.info("Loading VAD model...")
-        try:
-            vad_model, vad_utils = torch.hub.load('snakers4/silero-vad', model='silero_vad', force_reload=False)
-            vad_processor = AudioStreamProcessor(
-                model=vad_model,
-                utils=vad_utils,
-                sample_rate=16_000,
-                vad_threshold=config.vad_threshold,
-                callbacks={"on_speech_start": on_speech_start, "on_speech_end": on_speech_end},
-            )
-            logger.info("VAD model loaded successfully")
-        except Exception as e:
-            logger.warning(f"Could not load VAD model: {e}")
-            vad_processor = None
-            
-        logger.info("Loading voice model...")
-        try:
-            generator = load_csm_1b_local(config.model_path, "cpu")
-            logger.info("Voice model loaded successfully")
-        except Exception as e:
-            logger.warning(f"Could not load voice model: {e}")
-            generator = None
-            
-        # Start model thread
-        start_model_thread()
-        
-        models_loaded.set()
-        logger.info("All models loaded successfully!")
-        
-    except Exception as e:
-        logger.error(f"Error loading models: {e}")
-        # Even if models fail, we still set the event to allow the app to start
-        models_loaded.set()
-
-#### TO THIS POINT 
+whisper_pipe = pipeline(
+    "automatic-speech-recognition",
+    model=whisper_model,
+    tokenizer=processor.tokenizer,
+    feature_extractor=processor.feature_extractor,
+    torch_dtype=torch.float32,
+    device=-1,
+)
+#### TO THIS POINT
 
 async def process_message_queue():
     while True:
@@ -384,7 +310,7 @@ async def process_message_queue():
                     active_connections.remove(client)
         message_queue.task_done()
 
-def load_reference_segments(config_data: CompanionConfig):
+def load_reference_segments(config_ CompanionConfig):
     global reference_segments
     reference_segments = []
     if os.path.isfile(config_data.reference_audio_path):
@@ -407,10 +333,7 @@ def load_reference_segments(config_data: CompanionConfig):
     logger.info(f"Loaded {len(reference_segments)} reference audio segments.")
 
 def transcribe_audio(audio_data, sample_rate):
-    global whisper_pipe
-    if whisper_pipe is None:
-        return "[Transcription model not loaded]"
-    
+    global whisper_pipe # Access the global model
     audio_np = np.array(audio_data).astype(np.float32)
     if sample_rate != 16000:
         try:
@@ -425,8 +348,8 @@ def transcribe_audio(audio_data, sample_rate):
     except:
         return "[Transcription error]"
 
-def initialize_models(config_data: CompanionConfig):
-    global generator, llm, rag, vad_processor, config
+def initialize_models(config_ CompanionConfig):
+    global generator, llm, rag, vad_processor, config # Access global models
     config = config_data
     logger.info("Loading LLM …")
     llm = LLMInterface(config_data.llm_path, config_data.max_tokens)
@@ -504,7 +427,7 @@ def process_pending_inputs():
         process_user_input(user_text, session_id)
 
 def process_user_input(user_text, session_id="default"):
-    global config, is_speaking, pending_user_inputs, interrupt_flag
+    global config, is_speaking, pending_user_inputs, interrupt_flag # Access global config and state
     if not user_text or user_text.strip() == "":
         logger.warning("Empty user input received, ignoring")
         return
@@ -538,7 +461,7 @@ def process_user_input(user_text, session_id="default"):
     )
     try:
         with llm_lock:
-            ai_response = llm.generate_response(system_prompt, user_text, context)
+            ai_response = llm.generate_response(system_prompt, user_text, context) # Use global LLM
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         conversation_history.append({
             "timestamp": timestamp,
@@ -564,7 +487,7 @@ def process_user_input(user_text, session_id="default"):
             db.close()
         except Exception as e:
             logger.error(f"Database error: {e}")
-        threading.Thread(target=lambda: rag.add_conversation(user_text, ai_response), daemon=True).start()
+        threading.Thread(target=lambda: rag.add_conversation(user_text, ai_response), daemon=True).start() # Use global RAG
         asyncio.run_coroutine_threadsafe(
             message_queue.put({"type": "audio_status", "status": "preparing"}),
             loop
@@ -591,7 +514,7 @@ def process_user_input(user_text, session_id="default"):
         )
 
 def model_worker(cfg: CompanionConfig):
-    global generator, model_thread_running
+    global generator, model_thread_running # Access global generator
     logger.info("Model worker thread started")
     if generator is None:
         logger.info("Loading voice model inside worker thread …")
@@ -677,7 +600,7 @@ def save_audio_and_trim(path, session_id, speaker_id, tensor, sample_rate):
 MAX_SEGMENTS = 8
 
 def add_segment(text, speaker_id, audio_tensor):
-    global reference_segments, generator, config
+    global reference_segments, generator, config # Access global variables
     num_reference_segments = 1
     if hasattr(config, 'reference_audio_path2') and config.reference_audio_path2:
         num_reference_segments += 1
@@ -737,7 +660,7 @@ def preprocess_text_for_tts(text):
     return cleaned_text.strip()
 
 def audio_generation_thread(text, output_file):
-    global is_speaking, interrupt_flag, audio_queue, model_thread_running, current_generation_id, speaking_start_time
+    global is_speaking, interrupt_flag, audio_queue, model_thread_running, current_generation_id, speaking_start_time, generator # Access global generator
     current_generation_id += 1
     this_id = current_generation_id
     interrupt_flag.clear()
@@ -843,7 +766,7 @@ def audio_generation_thread(text, output_file):
                     message_queue.put({
                         "type": "audio_chunk",
                         "audio": chunk_array.tolist(),
-                        "sample_rate": generator.sample_rate,
+                        "sample_rate": generator.sample_rate, # Use global generator's sample rate
                         "gen_id": this_id,
                         "chunk_num": chunk_counter
                     }),
@@ -857,10 +780,10 @@ def audio_generation_thread(text, output_file):
         if all_audio_chunks and not interrupt_flag.is_set():
             try:
                 complete_audio = torch.cat(all_audio_chunks)
-                save_audio_and_trim(output_file, "default", config.voice_speaker_id, complete_audio, generator.sample_rate)
+                save_audio_and_trim(output_file, "default", config.voice_speaker_id, complete_audio, generator.sample_rate) # Use global generator's sample rate
                 add_segment(text.lower(), config.voice_speaker_id, complete_audio)
                 total_time = time.time() - generation_start
-                total_audio_seconds = complete_audio.size(0) / generator.sample_rate
+                total_audio_seconds = complete_audio.size(0) / generator.sample_rate # Use global generator's sample rate
                 rtf = total_time / total_audio_seconds
                 logger.info(f"Audio generation {this_id} - completed in {total_time:.2f}s, RTF: {rtf:.2f}x")
             except Exception as e:
@@ -891,7 +814,7 @@ def audio_generation_thread(text, output_file):
         audio_gen_lock.release()
 
 def handle_interrupt(websocket):
-    global is_speaking, last_interrupt_time, interrupt_flag, model_thread_running, speaking_start_time
+    global is_speaking, last_interrupt_time, interrupt_flag, model_thread_running, speaking_start_time, vad_processor # Access global vad_processor
     logger.info(f"Interrupt requested. Current state: is_speaking={is_speaking}")
     current_time = time.time()
     time_since_speech_start = current_time - speaking_start_time if speaking_start_time > 0 else 999
@@ -933,7 +856,7 @@ def handle_interrupt(websocket):
             logger.info("Audio queue cleared")
         except Exception as e:
             logger.error(f"Error clearing audio queue: {e}")
-        if vad_processor:
+        if vad_processor: # Use global vad_processor
             try:
                 vad_processor.reset()
                 logger.info("VAD processor reset")
@@ -957,7 +880,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
     if not token:
         await websocket.close(code=1008)  # Policy violation
         return
-    
+
     # Verify token
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -968,18 +891,18 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
     except JWTError:
         await websocket.close(code=1008)
         return
-    
+
     await websocket.accept()
-    
+
     # Add to session manager with user-specific data
     user_data = {"email": email, "conversation_history": []}
     session_manager.add_connection(token, websocket, user_data)
-    
+
     # Load saved config for this user
     saved = config_manager.load_config()
     if saved:
         await websocket.send_json({"type": "saved_config", "config": saved})
-    
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -990,7 +913,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                     logger.info(f"Received config data keys: {config_data.keys()}")
                     for key in ["reference_audio_path", "reference_audio_path2", "reference_audio_path3",
                                 "reference_text", "reference_text2", "reference_text3"]:
-                        if key in config_data:
+                        if key in config_
                             logger.info(f"Config includes {key}: {config_data[key]}")
                         else:
                             logger.warning(f"Config missing {key}")
@@ -1004,14 +927,14 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                 except Exception as e:
                     logger.error(f"Error processing config: {str(e)}")
                     await websocket.send_json({"type": "error", "message": f"Configuration error: {str(e)}"})
-            
+
             elif data["type"] == "request_saved_config":
                 saved = config_manager.load_config()
                 await websocket.send_json({"type": "saved_config", "config": saved})
             elif data["type"] == "text_message":
                 user_text = data["text"]
                 session_id = data.get("session_id", "default")
-                
+
                 logger.info(f"TEXT-MSG from client: {user_text!r}")
                 if is_speaking:
                     with user_input_lock:
@@ -1035,7 +958,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                     )
                     audio_data = audio_tensor.squeeze(0).numpy()
                     sample_rate = 16000
-                if config and config.vad_enabled:
+                global config, vad_processor # Access global config and vad_processor
+                if config and config.vad_enabled and vad_processor: # Check if vad_processor is loaded
                     vad_processor.process_audio(audio_data)
                 else:
                     text = transcribe_audio(audio_data, sample_rate)
@@ -1070,7 +994,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                 })
             elif data["type"] == "mute":
                 await websocket.send_json({"type": "mute_status", "muted": data["muted"]})
-                if not data["muted"] and config and config.vad_enabled:
+                global config, vad_processor # Access global config and vad_processor
+                if not data["muted"] and config and config.vad_enabled and vad_processor: # Check if vad_processor is loaded
                     vad_processor.reset()
     except WebSocketDisconnect:
         session_manager.remove_connection(token, websocket)
@@ -1090,46 +1015,32 @@ async def register_page(request: Request):
 # Protected routes
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request, current_user: User = Depends(get_current_user)):
-    # Wait for models to be loaded before allowing access to chat
-    if not models_loaded.is_set():
-        return templates.TemplateResponse("loading.html", {
-            "request": request, 
-            "user": current_user.email,
-            "message": "Loading AI models, please wait..."
-        })
     return templates.TemplateResponse("chat.html", {"request": request, "user": current_user.email})
 
 @app.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request, current_user: User = Depends(get_current_user)):
-    # Wait for models to be loaded before allowing access to setup
-    if not models_loaded.is_set():
-        return templates.TemplateResponse("loading.html", {
-            "request": request, 
-            "user": current_user.email,
-            "message": "Loading AI models, please wait..."
-        })
     return templates.TemplateResponse("setup.html", {"request": request, "user": current_user.email})
 
 # Authentication routes
 @app.post("/token")
-async def login_for_access_token(form_data: UserLogin):
+async def login_for_access_token(form_ UserLogin):
     db = SessionLocal()
     user = authenticate_user(db, form_data.email, form_data.password)
     db.close()
-    
+
     if not user:
         raise HTTPException(
             status_code=401,
             detail="Incorrect email or password"
         )
-    
+
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/register")
-async def register_user(user_data: UserCreate):
+async def register_user(user_ UserCreate):
     db = SessionLocal()
-    
+
     # Check if user already exists
     existing_user = get_user_by_email(db, user_data.email)
     if existing_user:
@@ -1138,27 +1049,14 @@ async def register_user(user_data: UserCreate):
             status_code=400,
             detail="User with this email already exists"
         )
-    
+
     # Create new user
     user = create_user(db, user_data.email, user_data.password)
     db.close()
-    
+
     # Create access token
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
-
-@app.get("/api/models_status")
-async def get_models_status():
-    """Check if models are loaded"""
-    status = {
-        "models_loaded": models_loaded.is_set(),
-        "whisper_loaded": whisper_pipe is not None,
-        "llm_loaded": llm is not None,
-        "rag_loaded": rag is not None,
-        "vad_loaded": vad_processor is not None,
-        "voice_loaded": generator is not None
-    }
-    return JSONResponse(content=status)
 
 def process_user_input_for_user_session(token: str, user_text: str, session_id: str):
     # This function should handle user input for a specific user session
@@ -1169,55 +1067,65 @@ def process_user_input_for_user_session(token: str, user_text: str, session_id: 
 async def startup_event():
     # Create tables if they don't exist
     Base.metadata.create_all(bind=engine)
-    
+
     os.makedirs("static", exist_ok=True)
     os.makedirs("audio/user", exist_ok=True)
     os.makedirs("audio/ai", exist_ok=True)
     os.makedirs("embeddings_cache", exist_ok=True)
     os.makedirs("templates", exist_ok=True)
-    
-    # Create loading page
-    with open("templates/loading.html", "w") as f:
-        f.write("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Loading...</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 500px; margin: 100px auto; padding: 20px; text-align: center; }
-        .spinner { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 50px; height: 50px; animation: spin 2s linear infinite; margin: 20px auto; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
-</head>
-<body>
-    <h2>Loading AI Models</h2>
-    <div class="spinner"></div>
-    <p>{{ message }}</p>
-    <p>This may take a few minutes...</p>
-    <script>
-        // Check model status every 3 seconds
-        function checkModelsStatus() {
-            fetch('/api/models_status')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.models_loaded) {
-                        window.location.reload();
-                    } else {
-                        setTimeout(checkModelsStatus, 3000);
-                    }
-                })
-                .catch(error => {
-                    setTimeout(checkModelsStatus, 3000);
-                });
-        }
-        
-        // Start checking status
-        setTimeout(checkModelsStatus, 3000);
-    </script>
-</body>
-</html>
-        """)
-    
+
+    # Load models before the application starts
+    logger.info("Loading models...")
+    global whisper_model, processor, whisper_pipe, generator, llm, rag, vad_processor # Declare globals to be assigned
+
+    # --- MODEL LOADING CODE MOVED HERE ---
+    # Find the exact snapshot path
+    cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
+    model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
+
+    # Get all snapshots and use the first one
+    snapshots = list(model_cache_dir.iterdir())
+    if not snapshots:
+        raise ValueError("No model snapshots found in cache!")
+
+    # Use the first snapshot (usually the only one or most recent)
+    snapshot_path = snapshots[0]
+    print(f"Using model from: {snapshot_path}")
+
+    # Verify config.json exists
+    config_path = snapshot_path / "config.json"
+    if not config_path.exists():
+        raise FileNotFoundError(f"config.json not found at {config_path}")
+
+    # Load using the direct local path
+    model_id = str(snapshot_path)
+
+    whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+        model_id,
+        torch_dtype=torch.float32,
+        low_cpu_mem_usage=True,
+        use_safetensors=True,
+        local_files_only=True
+    )
+    whisper_model.to("cpu")
+
+    processor = AutoProcessor.from_pretrained(
+        model_id,
+        local_files_only=True
+    )
+
+    whisper_pipe = pipeline(
+        "automatic-speech-recognition",
+        model=whisper_model,
+        tokenizer=processor.tokenizer,
+        feature_extractor=processor.feature_extractor,
+        torch_dtype=torch.float32,
+        device=-1, # Use CPU
+    )
+    # --- END MODEL LOADING ---
+
+    logger.info("Models loaded successfully.")
+
     # Create login page
     with open("templates/login.html", "w") as f:
         f.write("""
@@ -1257,7 +1165,7 @@ async def startup_event():
             e.preventDefault();
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
-            
+
             try {
                 const response = await fetch('/token', {
                     method: 'POST',
@@ -1266,7 +1174,7 @@ async def startup_event():
                     },
                     body: JSON.stringify({ email, password })
                 });
-                
+
                 if (response.ok) {
                     const data = await response.json();
                     localStorage.setItem('access_token', data.access_token);
@@ -1283,7 +1191,7 @@ async def startup_event():
 </body>
 </html>
         """)
-    
+
     # Create register page
     with open("templates/register.html", "w") as f:
         f.write("""
@@ -1323,7 +1231,7 @@ async def startup_event():
             e.preventDefault();
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
-            
+
             try {
                 const response = await fetch('/register', {
                     method: 'POST',
@@ -1332,7 +1240,7 @@ async def startup_event():
                     },
                     body: JSON.stringify({ email, password })
                 });
-                
+
                 if (response.ok) {
                     const data = await response.json();
                     localStorage.setItem('access_token', data.access_token);
@@ -1387,15 +1295,15 @@ async def startup_event():
         }
 
         const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
-        
+
         ws.onopen = () => {
             document.getElementById('status').textContent = 'Connected';
         };
-        
+
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             const messagesDiv = document.getElementById('messages');
-            
+
             if (data.type === 'transcription') {
                 messagesDiv.innerHTML += `<div class="message user"><strong>You:</strong> ${data.text}</div>`;
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -1404,12 +1312,12 @@ async def startup_event():
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
             }
         };
-        
+
         document.getElementById('input-form').addEventListener('submit', (e) => {
             e.preventDefault();
             const input = document.getElementById('message-input');
             const message = input.value.trim();
-            
+
             if (message) {
                 ws.send(JSON.stringify({
                     type: 'text_message',
@@ -1419,7 +1327,7 @@ async def startup_event():
                 input.value = '';
             }
         });
-        
+
         document.getElementById('interrupt-btn').addEventListener('click', () => {
             ws.send(JSON.stringify({ type: 'interrupt' }));
         });
@@ -1432,10 +1340,6 @@ async def startup_event():
     with open("templates/index.html", "w") as f:
         f.write("""<meta http-equiv="refresh" content="0; url=/login" />""")
 
-    # Start model loading in background thread
-    logger.info("Starting model loading process...")
-    threading.Thread(target=load_default_models, daemon=True).start()
-    
     try:
         torch.hub.load('snakers4/silero-vad', model='silero_vad', force_reload=False)
     except:
@@ -1460,7 +1364,7 @@ async def get_conversations(request: Request):
     return JSONResponse(content=data)
 
 @app.put("/api/conversations/{conv_id}")
-async def update_conversation(conv_id: int, data: dict):
+async def update_conversation(conv_id: int,  dict):
     try:
         conn = sqlite3.connect("companion.db")
         cur = conn.cursor()
@@ -1502,13 +1406,5 @@ async def crud_ui(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    
-    # Start the model loading process before starting the server
-    logger.info("Pre-loading models before starting server...")
-    load_default_models()
-    
-    # Start the asyncio loop
     threading.Thread(target=lambda: asyncio.run(loop.run_forever()), daemon=True).start()
-    
-    # Start the server
     uvicorn.run(app, host="0.0.0.0", port=8000)
