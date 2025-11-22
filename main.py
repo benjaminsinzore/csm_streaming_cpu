@@ -1023,7 +1023,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
-    # Verify token with better error handling
+    # Verify token
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email = payload.get("sub")
@@ -1046,37 +1046,55 @@ async def websocket_endpoint(websocket: WebSocket):
             
     except jwt.ExpiredSignatureError:
         logger.warning("WebSocket token expired")
-        await websocket.send_json({
-            "type": "error",
-            "message": "Token expired. Please login again."
-        })
-        await websocket.close(code=1008)
+        try:
+            # Try to send error message before closing
+            await websocket.accept()
+            await websocket.send_json({
+                "type": "error",
+                "message": "Token expired. Please login again."
+            })
+            await websocket.close(code=1008)
+        except Exception as e:
+            # If sending fails, just close the connection
+            logger.warning(f"Could not send error message for expired token: {e}")
+            try:
+                await websocket.close(code=1008)
+            except:
+                pass
         return
+        
     except jwt.JWTError as e:
         logger.warning(f"WebSocket token validation failed: {e}")
-        await websocket.send_json({
-            "type": "error", 
-            "message": "Invalid token. Please login again."
-        })
-        await websocket.close(code=1008)
+        try:
+            await websocket.accept()
+            await websocket.send_json({
+                "type": "error", 
+                "message": "Invalid token. Please login again."
+            })
+            await websocket.close(code=1008)
+        except Exception as send_error:
+            logger.warning(f"Could not send error message for invalid token: {send_error}")
+            try:
+                await websocket.close(code=1008)
+            except:
+                pass
         return
+        
     except Exception as e:
         logger.error(f"WebSocket authentication error: {e}")
-        await websocket.close(code=1008)
+        try:
+            await websocket.close(code=1008)
+        except:
+            pass
         return
 
-    # Check if models are loaded
-    if not models_loaded:
-        logger.warning("WebSocket connection attempted but models not loaded")
-        await websocket.send_json({
-            "type": "error", 
-            "message": "Models not loaded yet. Please check configuration."
-        })
-        await websocket.close(code=1013)  # Try again later
+    # If we get here, authentication was successful
+    try:
+        await websocket.accept()
+    except Exception as e:
+        logger.error(f"Failed to accept WebSocket connection: {e}")
         return
 
-    await websocket.accept()
-    
     # Add to active connections
     active_connections.append(websocket)
     
@@ -1085,15 +1103,24 @@ async def websocket_endpoint(websocket: WebSocket):
     session_manager.add_connection(token, websocket, user_data)
 
     # Send initial connection success message
-    await websocket.send_json({
-        "type": "status", 
-        "message": "Connected successfully"
-    })
+    try:
+        await websocket.send_json({
+            "type": "status", 
+            "message": "Connected successfully"
+        })
+    except Exception as e:
+        logger.error(f"Failed to send initial message: {e}")
+        if websocket in active_connections:
+            active_connections.remove(websocket)
+        return
 
     # Load saved config for this user if available
-    saved = config_manager.load_config()
-    if saved:
-        await websocket.send_json({"type": "saved_config", "config": saved})
+    try:
+        saved = config_manager.load_config()
+        if saved:
+            await websocket.send_json({"type": "saved_config", "config": saved})
+    except Exception as e:
+        logger.error(f"Failed to send saved config: {e}")
 
     try:
         while True:
@@ -1273,6 +1300,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close(code=1011)  # Internal error
         except:
             pass
+
 
 
 @app.get("/", response_class=HTMLResponse)
