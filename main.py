@@ -45,9 +45,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
-##NEW APPROACH
-from pathlib import Path
-
+## NEW APPROACH
 speaking_start_time = 0.0
 MIN_BARGE_LATENCY = 0.9
 speaker_counters = {
@@ -61,8 +59,10 @@ audio_fade_duration = 0.3
 last_interrupt_time = 0
 interrupt_cooldown = 6.0
 audio_chunk_buffer = []
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 model_thread = None
 model_queue = queue.Queue()
 model_result_queue = queue.Queue()
@@ -70,12 +70,11 @@ model_thread_running = threading.Event()
 llm_lock = threading.Lock()
 audio_gen_lock = threading.Lock()
 
-# Initialize Base after importing declarative_base
+# Initialize DB
 Base = declarative_base()
 engine = create_engine("sqlite:///companion.db")
 SessionLocal = sessionmaker(bind=engine)
 
-# Database Models - Define these after Base is initialized
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
@@ -100,10 +99,8 @@ class Conversation(Base):
     ai_message = Column(Text)
     audio_path = Column(String)
 
-# Create all tables
 Base.metadata.create_all(bind=engine)
 
-# JWT Token Models
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -135,14 +132,12 @@ class CompanionConfig(BaseModel):
     vad_threshold: float = 0.5
     embedding_model: str = "all-MiniLM-L6-v2"
 
-# User authentication functions
+# Auth helpers
 def verify_password(plain_password, hashed_password):
-    # Truncate plain_password before verifying if needed
     truncated_password = plain_password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
     return pwd_context.verify(truncated_password, hashed_password)
 
 def get_password_hash(password):
-    # Truncate password before hashing if needed
     truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
     return pwd_context.hash(truncated_password)
 
@@ -160,52 +155,40 @@ def get_user_by_email(db, email: str):
 def authenticate_user(db, email: str, password: str):
     user = get_user_by_email(db, email)
     if not user:
-        # To prevent timing attacks, we should still call verify_password even if user doesn't exist
-        verify_password("dummy_password", "dummy_hash") # Simulate verification time
+        verify_password("dummy_password", "dummy_hash")
         return None
-    # Truncate the provided password before verifying
     truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
     if not verify_password(truncated_password, user.hashed_password):
         return None
     return user
 
-def create_access_token( dict, expires_delta: timedelta = None):
+def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now() + expires_delta
-    else:
-        expire = datetime.now() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire.timestamp()})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    credentials_exception = HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
+        email = payload.get("sub")
         if email is None:
             raise credentials_exception
         token_data = TokenData(email=email)
     except JWTError:
         raise credentials_exception
-
     db = SessionLocal()
     user = get_user_by_email(db, email=email)
     db.close()
-
     if user is None:
         raise credentials_exception
     return user
 
-# Session management for WebSocket connections
+# Session manager
 class SessionManager:
     def __init__(self):
-        self.sessions = {}  # {token: {'connections': [], 'user_data': {}}}
+        self.sessions = {}
 
     def add_connection(self, token: str, websocket, user_data: dict):
         if token not in self.sessions:
@@ -223,7 +206,7 @@ class SessionManager:
 
 session_manager = SessionManager()
 
-# Global variables for models - declared here but initialized in startup_event
+# Global model/state variables
 whisper_model = None
 processor = None
 whisper_pipe = None
@@ -231,8 +214,7 @@ generator = None
 llm = None
 rag = None
 vad_processor = None
-config = None # Global config instance
-
+config = None
 conversation_history = []
 audio_queue = queue.Queue()
 is_speaking = False
@@ -240,7 +222,6 @@ interrupt_flag = threading.Event()
 reference_segments = []
 active_connections = []
 message_queue = asyncio.Queue()
-
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
@@ -249,53 +230,53 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
 
-### NEW CODE FROM THIS POINT
-model_id = "openai/whisper-large-v3-turbo"
+# ==============================
+# 🔥 EARLY MODEL LOADING — BEFORE SERVER START
+# ==============================
+def load_all_models():
+    global whisper_model, processor, whisper_pipe
+    logger.info("Loading Whisper model from local cache...")
+    cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
+    model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
+    snapshots = list(model_cache_dir.iterdir())
+    if not snapshots:
+        raise ValueError("No model snapshots found in cache!")
+    snapshot_path = snapshots[0]
+    logger.info(f"Using model from: {snapshot_path}")
+    config_path = snapshot_path / "config.json"
+    if not config_path.exists():
+        raise FileNotFoundError(f"config.json not found at {config_path}")
+    model_id = str(snapshot_path)
 
-# Find the exact snapshot path
-cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
-model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
+    whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+        model_id,
+        torch_dtype=torch.float32,
+        low_cpu_mem_usage=True,
+        use_safetensors=True,
+        local_files_only=True
+    )
+    whisper_model.to("cpu")
+    processor = AutoProcessor.from_pretrained(model_id, local_files_only=True)
+    whisper_pipe = pipeline(
+        "automatic-speech-recognition",
+        model=whisper_model,
+        tokenizer=processor.tokenizer,
+        feature_extractor=processor.feature_extractor,
+        torch_dtype=torch.float32,
+        device=-1,
+    )
 
-# Get all snapshots and use the first one
-snapshots = list(model_cache_dir.iterdir())
-if not snapshots:
-    raise ValueError("No model snapshots found in cache!")
+    logger.info("Loading Silero VAD model (pre-warm)...")
+    try:
+        torch.hub.load('snakers4/silero-vad', model='silero_vad', force_reload=False)
+    except Exception as e:
+        logger.warning(f"Failed to preload VAD: {e}")
 
-# Use the first snapshot (usually the only one or most recent)
-snapshot_path = snapshots[0]
-print(f"Using model from: {snapshot_path}")
+    logger.info("✅ All models loaded successfully.")
 
-# Verify config.json exists
-config_path = snapshot_path / "config.json"
-if not config_path.exists():
-    raise FileNotFoundError(f"config.json not found at {config_path}")
-
-# Load using the direct local path
-model_id = str(snapshot_path)
-
-whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
-    model_id,
-    torch_dtype=torch.float32,
-    low_cpu_mem_usage=True,
-    use_safetensors=True,
-    local_files_only=True
-)
-whisper_model.to("cpu")
-
-processor = AutoProcessor.from_pretrained(
-    model_id,
-    local_files_only=True
-)
-
-whisper_pipe = pipeline(
-    "automatic-speech-recognition",
-    model=whisper_model,
-    tokenizer=processor.tokenizer,
-    feature_extractor=processor.feature_extractor,
-    torch_dtype=torch.float32,
-    device=-1,
-)
-#### TO THIS POINT
+# ==============================
+# Application routes & logic
+# ==============================
 
 async def process_message_queue():
     while True:
@@ -333,7 +314,7 @@ def load_reference_segments(config_data: CompanionConfig):
     logger.info(f"Loaded {len(reference_segments)} reference audio segments.")
 
 def transcribe_audio(audio_data, sample_rate):
-    global whisper_pipe # Access the global model
+    global whisper_pipe
     audio_np = np.array(audio_data).astype(np.float32)
     if sample_rate != 16000:
         try:
@@ -349,7 +330,7 @@ def transcribe_audio(audio_data, sample_rate):
         return "[Transcription error]"
 
 def initialize_models(config_data: CompanionConfig):
-    global generator, llm, rag, vad_processor, config # Access global models
+    global generator, llm, rag, vad_processor, config
     config = config_data
     logger.info("Loading LLM …")
     llm = LLMInterface(config_data.llm_path, config_data.max_tokens)
@@ -367,9 +348,7 @@ def initialize_models(config_data: CompanionConfig):
     start_model_thread()
     logger.info("Warming up voice model …")
     t0 = time.time()
-    model_queue.put((
-        "warm-up.", config_data.voice_speaker_id, [], 500, 0.7, 40,
-    ))
+    model_queue.put(("warm-up.", config_data.voice_speaker_id, [], 500, 0.7, 40))
     while True:
         r = model_result_queue.get()
         if r is None:
@@ -378,13 +357,7 @@ def initialize_models(config_data: CompanionConfig):
 
 def on_speech_start():
     asyncio.run_coroutine_threadsafe(
-        message_queue.put(
-            {
-                "type": "vad_status",
-                "status": "speech_started",
-                "should_interrupt": False,
-            }
-        ),
+        message_queue.put({"type": "vad_status", "status": "speech_started"}),
         loop,
     )
 
@@ -427,41 +400,26 @@ def process_pending_inputs():
         process_user_input(user_text, session_id)
 
 def process_user_input(user_text, session_id="default"):
-    global config, is_speaking, pending_user_inputs, interrupt_flag # Access global config and state
+    global config, is_speaking, pending_user_inputs, interrupt_flag
     if not user_text or user_text.strip() == "":
         logger.warning("Empty user input received, ignoring")
         return
     interrupt_flag.clear()
     is_speaking = False
-    if is_speaking:
-        logger.info(f"AI is currently speaking, adding input to pending queue: '{user_text}'")
-        with user_input_lock:
-            pending_user_inputs = [(user_text, session_id)]
-            logger.info(f"Added user input as the only pending input: '{user_text}'")
-        if not interrupt_flag.is_set():
-            logger.info("Automatically interrupting current speech for new input")
-            interrupt_flag.set()
-            asyncio.run_coroutine_threadsafe(
-                message_queue.put({"type": "audio_status", "status": "interrupted"}),
-                loop
-            )
-            time.sleep(0.3)
-            process_pending_inputs()
-        return
     interrupt_flag.clear()
     logger.info(f"Processing user input: '{user_text}'")
     context = "\n".join([f"User: {msg['user']}\nAI: {msg['ai']}" for msg in conversation_history[-5:]])
     rag_context = rag.query(user_text)
     system_prompt = config.system_prompt
     if rag_context:
-        system_prompt += f"\n\nRelevant context:\n{rag_context}"
+        system_prompt += f"\nRelevant context:\n{rag_context}"
     asyncio.run_coroutine_threadsafe(
         message_queue.put({"type": "status", "message": "Thinking..."}),
         loop
     )
     try:
         with llm_lock:
-            ai_response = llm.generate_response(system_prompt, user_text, context) # Use global LLM
+            ai_response = llm.generate_response(system_prompt, user_text, context)
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         conversation_history.append({
             "timestamp": timestamp,
@@ -487,7 +445,7 @@ def process_user_input(user_text, session_id="default"):
             db.close()
         except Exception as e:
             logger.error(f"Database error: {e}")
-        threading.Thread(target=lambda: rag.add_conversation(user_text, ai_response), daemon=True).start() # Use global RAG
+        threading.Thread(target=lambda: rag.add_conversation(user_text, ai_response), daemon=True).start()
         asyncio.run_coroutine_threadsafe(
             message_queue.put({"type": "audio_status", "status": "preparing"}),
             loop
@@ -514,7 +472,7 @@ def process_user_input(user_text, session_id="default"):
         )
 
 def model_worker(cfg: CompanionConfig):
-    global generator, model_thread_running # Access global generator
+    global generator, model_thread_running
     logger.info("Model worker thread started")
     if generator is None:
         logger.info("Loading voice model inside worker thread …")
@@ -571,12 +529,7 @@ def send_to_all_clients(message: dict):
             if client in active_connections:
                 active_connections.remove(client)
 
-saved_audio_paths = {
-    "default": {
-        0: [],
-        1: []
-    }
-}
+saved_audio_paths = {"default": {0: [], 1: []}}
 MAX_AUDIO_FILES = 8
 
 def save_audio_and_trim(path, session_id, speaker_id, tensor, sample_rate):
@@ -600,15 +553,15 @@ def save_audio_and_trim(path, session_id, speaker_id, tensor, sample_rate):
 MAX_SEGMENTS = 8
 
 def add_segment(text, speaker_id, audio_tensor):
-    global reference_segments, generator, config # Access global variables
-    num_reference_segments = 1
-    if hasattr(config, 'reference_audio_path2') and config.reference_audio_path2:
-        num_reference_segments += 1
-    if hasattr(config, 'reference_audio_path3') and config.reference_audio_path3:
-        num_reference_segments += 1
+    global reference_segments, generator, config
+    num_reference_segments = sum([
+        bool(getattr(config, 'reference_audio_path', None)),
+        bool(getattr(config, 'reference_audio_path2', None)),
+        bool(getattr(config, 'reference_audio_path3', None)),
+    ])
     new_segment = Segment(text=text, speaker=speaker_id, audio=audio_tensor)
-    protected_segments = reference_segments[:num_reference_segments] if len(reference_segments) >= num_reference_segments else reference_segments.copy()
-    dynamic_segments = reference_segments[num_reference_segments:] if len(reference_segments) > num_reference_segments else []
+    protected_segments = reference_segments[:num_reference_segments]
+    dynamic_segments = reference_segments[num_reference_segments:]
     dynamic_segments.append(new_segment)
     while len(protected_segments) + len(dynamic_segments) > MAX_SEGMENTS:
         if dynamic_segments:
@@ -635,44 +588,24 @@ def add_segment(text, speaker_id, audio_tensor):
         logger.info(f"Segments: {len(reference_segments)} ({len(protected_segments)} protected, {len(dynamic_segments)} dynamic), total tokens: {total_tokens}/2048")
     else:
         logger.warning("Unable to access tokenizer - falling back to word-based estimation")
-        def estimate_tokens(segment):
-            words = segment.text.split()
-            punctuation = sum(1 for char in segment.text if char in ".,!?;:\"'()[]{}")
-            text_tokens = len(words) + punctuation
-            audio_tokens = 0
-            if segment.audio is not None:
-                audio_frames = segment.audio.size(0) // 300
-                audio_tokens = audio_frames
-            return text_tokens + audio_tokens
-        total_estimated_tokens = sum(estimate_tokens(segment) for segment in reference_segments)
-        while dynamic_segments and total_estimated_tokens > 2048:
-            removed = dynamic_segments.pop(0)
-            idx = reference_segments.index(removed)
-            reference_segments.pop(idx)
-            total_estimated_tokens -= estimate_tokens(removed)
-        logger.info(f"Segments: {len(reference_segments)} ({len(protected_segments)} protected, {len(dynamic_segments)} dynamic), estimated tokens: {total_estimated_tokens}/2048")
 
 def preprocess_text_for_tts(text):
-    pattern = r'[^\w\s.,!?\']'
+    pattern = r'[^\w\s.,!?\'\']'
     cleaned_text = re.sub(pattern, '', text)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
     cleaned_text = re.sub(r'([.,!?])(\S)', r'\1 \2', cleaned_text)
     return cleaned_text.strip()
 
 def audio_generation_thread(text, output_file):
-    global is_speaking, interrupt_flag, audio_queue, model_thread_running, current_generation_id, speaking_start_time, generator # Access global generator
+    global is_speaking, interrupt_flag, audio_queue, model_thread_running, current_generation_id, speaking_start_time, generator
     current_generation_id += 1
     this_id = current_generation_id
     interrupt_flag.clear()
     logger.info(f"Starting audio generation for ID: {this_id}")
     if not audio_gen_lock.acquire(blocking=False):
-        logger.warning(f"Audio generation {this_id} - lock acquisition failed, another generation is in progress")
+        logger.warning(f"Audio generation {this_id} - lock acquisition failed")
         asyncio.run_coroutine_threadsafe(
-            message_queue.put({
-                "type": "error",
-                "message": "Audio generation busy, skipping synthesis",
-                "gen_id": this_id
-            }),
+            message_queue.put({"type": "error", "message": "Audio generation busy, skipping synthesis"}),
             loop
         )
         return
@@ -685,25 +618,6 @@ def audio_generation_thread(text, output_file):
         all_audio_chunks = []
         text_lower = text.lower()
         text_lower = preprocess_text_for_tts(text_lower)
-        asyncio.run_coroutine_threadsafe(
-            message_queue.put({
-                "type": "audio_status",
-                "status": "preparing_generation",
-                "gen_id": this_id
-            }),
-            loop
-        )
-        time.sleep(0.2)
-        logger.info(f"Sending generating status with ID {this_id}")
-        asyncio.run_coroutine_threadsafe(
-            message_queue.put({
-                "type": "audio_status",
-                "status": "generating",
-                "gen_id": this_id
-            }),
-            loop
-        )
-        time.sleep(0.2)
         words = text.split()
         avg_wpm = 100
         words_per_second = avg_wpm / 60
@@ -722,7 +636,7 @@ def audio_generation_thread(text, output_file):
         while True:
             try:
                 if interrupt_flag.is_set():
-                    logger.info(f"Audio generation {this_id} - interrupt detected, stopping")
+                    logger.info(f"Audio generation {this_id} - interrupt detected")
                     model_thread_running.clear()
                     time.sleep(0.1)
                     model_thread_running.set()
@@ -745,20 +659,14 @@ def audio_generation_thread(text, output_file):
                     logger.info(f"Audio generation {this_id} - first chunk latency: {first_chunk_time*1000:.1f}ms")
                 chunk_counter += 1
                 if interrupt_flag.is_set():
-                    logger.info(f"Audio generation {this_id} - interrupt flag set during chunk processing")
                     break
                 audio_chunk = result
                 all_audio_chunks.append(audio_chunk)
                 chunk_array = audio_chunk.cpu().numpy().astype(np.float32)
                 audio_queue.put(chunk_array)
                 if chunk_counter == 1:
-                    logger.info(f"Sending first audio chunk with ID {this_id}")
                     asyncio.run_coroutine_threadsafe(
-                        message_queue.put({
-                            "type": "audio_status",
-                            "status": "first_chunk",
-                            "gen_id": this_id
-                        }),
+                        message_queue.put({"type": "audio_status", "status": "first_chunk", "gen_id": this_id}),
                         loop
                     )
                     time.sleep(0.1)
@@ -766,7 +674,7 @@ def audio_generation_thread(text, output_file):
                     message_queue.put({
                         "type": "audio_chunk",
                         "audio": chunk_array.tolist(),
-                        "sample_rate": generator.sample_rate, # Use global generator's sample rate
+                        "sample_rate": generator.sample_rate,
                         "gen_id": this_id,
                         "chunk_num": chunk_counter
                     }),
@@ -780,10 +688,10 @@ def audio_generation_thread(text, output_file):
         if all_audio_chunks and not interrupt_flag.is_set():
             try:
                 complete_audio = torch.cat(all_audio_chunks)
-                save_audio_and_trim(output_file, "default", config.voice_speaker_id, complete_audio, generator.sample_rate) # Use global generator's sample rate
+                save_audio_and_trim(output_file, "default", config.voice_speaker_id, complete_audio, generator.sample_rate)
                 add_segment(text.lower(), config.voice_speaker_id, complete_audio)
                 total_time = time.time() - generation_start
-                total_audio_seconds = complete_audio.size(0) / generator.sample_rate # Use global generator's sample rate
+                total_audio_seconds = complete_audio.size(0) / generator.sample_rate
                 rtf = total_time / total_audio_seconds
                 logger.info(f"Audio generation {this_id} - completed in {total_time:.2f}s, RTF: {rtf:.2f}x")
             except Exception as e:
@@ -794,58 +702,27 @@ def audio_generation_thread(text, output_file):
     finally:
         is_speaking = False
         audio_queue.put(None)
-        try:
-            logger.info(f"Audio generation {this_id} - sending completion status")
-            asyncio.run_coroutine_threadsafe(
-                message_queue.put({
-                    "type": "audio_status",
-                    "status": "complete",
-                    "gen_id": this_id
-                }),
-                loop
-            )
-        except Exception as e:
-            logger.error(f"Audio generation {this_id} - failed to send completion status: {e}")
+        asyncio.run_coroutine_threadsafe(
+            message_queue.put({"type": "audio_status", "status": "complete", "gen_id": this_id}),
+            loop
+        )
         with user_input_lock:
             if pending_user_inputs:
-                logger.info(f"Audio generation {this_id} - processing pending inputs")
                 process_pending_inputs()
-        logger.info(f"Audio generation {this_id} - releasing lock")
         audio_gen_lock.release()
 
 def handle_interrupt(websocket):
-    global is_speaking, last_interrupt_time, interrupt_flag, model_thread_running, speaking_start_time, vad_processor # Access global vad_processor
-    logger.info(f"Interrupt requested. Current state: is_speaking={is_speaking}")
+    global is_speaking, last_interrupt_time, interrupt_flag, model_thread_running, speaking_start_time, vad_processor
     current_time = time.time()
     time_since_speech_start = current_time - speaking_start_time if speaking_start_time > 0 else 999
     time_since_last_interrupt = current_time - last_interrupt_time
     if time_since_last_interrupt < interrupt_cooldown and time_since_speech_start > 3.0:
-        logger.info(f"Ignoring interrupt: too soon after previous interrupt ({time_since_last_interrupt:.1f}s < {interrupt_cooldown}s)")
-        asyncio.run_coroutine_threadsafe(
-            websocket.send_json({
-                "type": "audio_status",
-                "status": "interrupt_acknowledged",
-                "success": False,
-                "reason": "cooldown"
-            }),
-            loop
-        )
+        logger.info(f"Ignoring interrupt: cooldown active")
         return False
     last_interrupt_time = current_time
     if is_speaking or not model_result_queue.empty():
-        logger.info("Interruption processing: we are speaking or generating")
         interrupt_flag.set()
-        asyncio.run_coroutine_threadsafe(
-            message_queue.put({"type": "audio_status", "status": "interrupted"}),
-            loop
-        )
-        asyncio.run_coroutine_threadsafe(
-            websocket.send_json({
-                "type": "audio_status",
-                "status": "interrupt_acknowledged"
-            }),
-            loop
-        )
+        asyncio.run_coroutine_threadsafe(message_queue.put({"type": "audio_status", "status": "interrupted"}), loop)
         try:
             while not audio_queue.empty():
                 try:
@@ -856,7 +733,7 @@ def handle_interrupt(websocket):
             logger.info("Audio queue cleared")
         except Exception as e:
             logger.error(f"Error clearing audio queue: {e}")
-        if vad_processor: # Use global vad_processor
+        if vad_processor:
             try:
                 vad_processor.reset()
                 logger.info("VAD processor reset")
@@ -872,17 +749,18 @@ def handle_interrupt(websocket):
             except Exception as e:
                 logger.error(f"Error restarting model thread: {e}")
         return True
-    logger.info("No active speech to interrupt")
     return False
+
+# ==============================
+# FastAPI routes
+# ==============================
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str = None):
-    global config, vad_processor # Move global declarations to the start of the function
+    global config, vad_processor
     if not token:
-        await websocket.close(code=1008)  # Policy violation
+        await websocket.close(code=1008)
         return
-
-    # Verify token
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email = payload.get("sub")
@@ -892,31 +770,21 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
     except JWTError:
         await websocket.close(code=1008)
         return
-
     await websocket.accept()
-
-    # Add to session manager with user-specific data
     user_data = {"email": email, "conversation_history": []}
     session_manager.add_connection(token, websocket, user_data)
-
-    # Load saved config for this user
     saved = config_manager.load_config()
     if saved:
         await websocket.send_json({"type": "saved_config", "config": saved})
-
     try:
         while True:
             data = await websocket.receive_json()
-            # Process messages for this specific session
             if data["type"] == "config":
                 try:
                     config_data = data["config"]
-                    logger.info(f"Received config data keys: {config_data.keys()}")
                     for key in ["reference_audio_path", "reference_audio_path2", "reference_audio_path3",
                                 "reference_text", "reference_text2", "reference_text3"]:
-                        if key in config_data: # Fixed: was 'config_'
-                            logger.info(f"Config includes {key}: {config_data[key]}")
-                        else:
+                        if key not in config_data:
                             logger.warning(f"Config missing {key}")
                     conf = CompanionConfig(**config_data)
                     saved = config_manager.save_config(config_data)
@@ -928,39 +796,31 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                 except Exception as e:
                     logger.error(f"Error processing config: {str(e)}")
                     await websocket.send_json({"type": "error", "message": f"Configuration error: {str(e)}"})
-
             elif data["type"] == "request_saved_config":
                 saved = config_manager.load_config()
                 await websocket.send_json({"type": "saved_config", "config": saved})
             elif data["type"] == "text_message":
                 user_text = data["text"]
                 session_id = data.get("session_id", "default")
-
                 logger.info(f"TEXT-MSG from client: {user_text!r}")
                 if is_speaking:
                     with user_input_lock:
                         if len(pending_user_inputs) >= 3:
                             pending_user_inputs = pending_user_inputs[-2:]
                         pending_user_inputs.append((user_text, session_id))
-                    await websocket.send_json(
-                        {"type": "status", "message": "Queued – I'll answer in a moment"})
+                    await websocket.send_json({"type": "status", "message": "Queued – I'll answer in a moment"})
                     continue
                 await message_queue.put({"type": "transcription", "text": user_text})
-                threading.Thread(
-                    target=lambda: process_user_input(user_text, session_id),
-                    daemon=True).start()
+                threading.Thread(target=lambda: process_user_input(user_text, session_id), daemon=True).start()
             elif data["type"] == "audio":
                 audio_data = np.asarray(data["audio"], dtype=np.float32)
                 sample_rate = data["sample_rate"]
                 if sample_rate != 16000:
                     audio_tensor = torch.tensor(audio_data).unsqueeze(0)
-                    audio_tensor = torchaudio.functional.resample(
-                        audio_tensor, orig_freq=sample_rate, new_freq=16000
-                    )
+                    audio_tensor = torchaudio.functional.resample(audio_tensor, orig_freq=sample_rate, new_freq=16000)
                     audio_data = audio_tensor.squeeze(0).numpy()
                     sample_rate = 16000
-                # global config, vad_processor # Remove this line - it's now at the function start
-                if config and config.vad_enabled and vad_processor: # Check if vad_processor is loaded
+                if config and config.vad_enabled and vad_processor:
                     vad_processor.process_audio(audio_data)
                 else:
                     text = transcribe_audio(audio_data, sample_rate)
@@ -973,10 +833,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                         process_user_input(text)
             elif data["type"] == "interrupt":
                 logger.info("Explicit interrupt request received")
-                await websocket.send_json({
-                    "type": "audio_status",
-                    "status": "interrupt_acknowledged"
-                })
                 success = handle_interrupt(websocket)
                 if success:
                     await asyncio.sleep(0.3)
@@ -984,23 +840,14 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                         if pending_user_inputs:
                             user_text, session_id = pending_user_inputs.pop(0)
                             pending_user_inputs.clear()
-                            threading.Thread(
-                                target=lambda: process_user_input(user_text, session_id),
-                                daemon=True
-                            ).start()
-                await websocket.send_json({
-                    "type": "audio_status",
-                    "status": "interrupted",
-                    "success": success
-                })
+                            threading.Thread(target=lambda: process_user_input(user_text, session_id), daemon=True).start()
+                await websocket.send_json({"type": "audio_status", "status": "interrupted", "success": success})
             elif data["type"] == "mute":
                 await websocket.send_json({"type": "mute_status", "muted": data["muted"]})
-                # global config, vad_processor # Remove this line - it's now at the function start
-                if not data["muted"] and config and config.vad_enabled and vad_processor: # Check if vad_processor is loaded
+                if not data["muted"] and config and config.vad_enabled and vad_processor:
                     vad_processor.reset()
     except WebSocketDisconnect:
         session_manager.remove_connection(token, websocket)
-
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -1014,7 +861,6 @@ async def login_page(request: Request):
 async def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
 
-# Protected routes
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request, current_user: User = Depends(get_current_user)):
     return templates.TemplateResponse("chat.html", {"request": request, "user": current_user.email})
@@ -1023,342 +869,192 @@ async def chat_page(request: Request, current_user: User = Depends(get_current_u
 async def setup_page(request: Request, current_user: User = Depends(get_current_user)):
     return templates.TemplateResponse("setup.html", {"request": request, "user": current_user.email})
 
-# Authentication routes
 @app.post("/token")
-async def login_for_access_token(form_data: UserLogin): # Fixed: 'form_data: UserLogin'
+async def login_for_access_token(form_data: UserLogin):
     db = SessionLocal()
-    user = authenticate_user(db, form_data.email, form_data.password) # Now 'form_data' is correctly defined
+    user = authenticate_user(db, form_data.email, form_data.password)
     db.close()
-
     if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Incorrect email or password"
-        )
-
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/register")
-async def register_user(user_data: UserCreate): # Fixed: 'user_data: UserCreate'
+async def register_user(user_data: UserCreate):
     db = SessionLocal()
-
-    # Check if user already exists
-    existing_user = get_user_by_email(db, user_data.email) # Now 'user_data' is correctly defined
+    existing_user = get_user_by_email(db, user_data.email)
     if existing_user:
         db.close()
-        raise HTTPException(
-            status_code=400,
-            detail="User with this email already exists"
-        )
-
-    # Create new user
-    user = create_user(db, user_data.email, user_data.password) # Now 'user_data' is correctly defined
+        raise HTTPException(status_code=400, detail="User with this email already exists")
+    user = create_user(db, user_data.email, user_data.password)
     db.close()
-
-    # Create access token
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
-
-def process_user_input_for_user_session(token: str, user_text: str, session_id: str):
-    # This function should handle user input for a specific user session
-    # You'll need to modify your existing process_user_input to work with sessions
-    pass
-
 @app.on_event("startup")
 async def startup_event():
-    # Create tables if they don't exist
-    Base.metadata.create_all(bind=engine)
-
     os.makedirs("static", exist_ok=True)
     os.makedirs("audio/user", exist_ok=True)
     os.makedirs("audio/ai", exist_ok=True)
     os.makedirs("embeddings_cache", exist_ok=True)
     os.makedirs("templates", exist_ok=True)
 
-    # Load models before the application starts
-    logger.info("Loading models...")
-    global whisper_model, processor, whisper_pipe, generator, llm, rag, vad_processor # Declare globals to be assigned
-
-    # --- MODEL LOADING CODE MOVED HERE ---
-    # Find the exact snapshot path
-    cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
-    model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
-
-    # Get all snapshots and use the first one
-    snapshots = list(model_cache_dir.iterdir())
-    if not snapshots:
-        raise ValueError("No model snapshots found in cache!")
-
-    # Use the first snapshot (usually the only one or most recent)
-    snapshot_path = snapshots[0]
-    print(f"Using model from: {snapshot_path}")
-
-    # Verify config.json exists
-    config_path = snapshot_path / "config.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"config.json not found at {config_path}")
-
-    # Load using the direct local path
-    model_id = str(snapshot_path)
-
-    whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        model_id,
-        torch_dtype=torch.float32,
-        low_cpu_mem_usage=True,
-        use_safetensors=True,
-        local_files_only=True
-    )
-    whisper_model.to("cpu")
-
-    processor = AutoProcessor.from_pretrained(
-        model_id,
-        local_files_only=True
-    )
-
-    whisper_pipe = pipeline(
-        "automatic-speech-recognition",
-        model=whisper_model,
-        tokenizer=processor.tokenizer,
-        feature_extractor=processor.feature_extractor,
-        torch_dtype=torch.float32,
-        device=-1, # Use CPU
-    )
-    # --- END MODEL LOADING ---
-
-    logger.info("Models loaded successfully.")
-
     # Create login page
     with open("templates/login.html", "w") as f:
         f.write("""
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Login</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; }
-        input[type="email"], input[type="password"] { width: 100%; padding: 8px; box-sizing: border-box; }
-        button { background: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; }
-        .register-link { margin-top: 10px; }
-    </style>
+<head><title>Login</title>
+<style>body{font-family:Arial,sans-serif;max-width:400px;margin:50px auto;padding:20px}
+.form-group{margin-bottom:15px}label{display:block;margin-bottom:5px}
+input[type="email"],input[type="password"]{width:100%;padding:8px;box-sizing:border-box}
+button{background:#007bff;color:white;padding:10px 20px;border:none;cursor:pointer}
+.register-link{margin-top:10px}</style>
 </head>
-<body>
-    <h2>Login</h2>
-    <form id="loginForm">
-        <div class="form-group">
-            <label for="email">Email:</label>
-            <input type="email" id="email" required>
-        </div>
-        <div class="form-group">
-            <label for="password">Password:</label>
-            <input type="password" id="password" required>
-        </div>
-        <button type="submit">Login</button>
-    </form>
-    <div class="register-link">
-        <p>Don't have an account? <a href="/register">Register here</a></p>
-    </div>
-    <div id="message"></div>
-
-    <script>
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-
-            try {
-                const response = await fetch('/token', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ email, password })
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    localStorage.setItem('access_token', data.access_token);
-                    window.location.href = '/chat';
-                } else {
-                    const error = await response.json();
-                    document.getElementById('message').innerHTML = `<p style="color: red;">${error.detail}</p>`;
-                }
-            } catch (error) {
-                document.getElementById('message').innerHTML = '<p style="color: red;">Login failed</p>';
-            }
+<body><h2>Login</h2>
+<form id="loginForm">
+<div class="form-group"><label>Email:</label><input type="email" id="email" required></div>
+<div class="form-group"><label>Password:</label><input type="password" id="password" required></div>
+<button type="submit">Login</button>
+</form>
+<div class="register-link"><p>Don't have an account? <a href="/register">Register here</a></p></div>
+<div id="message"></div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    try {
+        const response = await fetch('/token', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email, password})
         });
-    </script>
+        if (response.ok) {
+            const data = await response.json();
+            localStorage.setItem('access_token', data.access_token);
+            window.location.href = '/chat';
+        } else {
+            const error = await response.json();
+            document.getElementById('message').innerHTML = `<p style="color:red;">${error.detail}</p>`;
+        }
+    } catch (error) {
+        document.getElementById('message').innerHTML = '<p style="color:red;">Login failed</p>';
+    }
+});
+</script>
 </body>
 </html>
         """)
-
-    # Create register page
     with open("templates/register.html", "w") as f:
         f.write("""
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Register</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; }
-        input[type="email"], input[type="password"] { width: 100%; padding: 8px; box-sizing: border-box; }
-        button { background: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; }
-        .login-link { margin-top: 10px; }
-    </style>
+<head><title>Register</title>
+<style>body{font-family:Arial,sans-serif;max-width:400px;margin:50px auto;padding:20px}
+.form-group{margin-bottom:15px}label{display:block;margin-bottom:5px}
+input[type="email"],input[type="password"]{width:100%;padding:8px;box-sizing:border-box}
+button{background:#007bff;color:white;padding:10px 20px;border:none;cursor:pointer}
+.login-link{margin-top:10px}</style>
 </head>
-<body>
-    <h2>Register</h2>
-    <form id="registerForm">
-        <div class="form-group">
-            <label for="email">Email:</label>
-            <input type="email" id="email" required>
-        </div>
-        <div class="form-group">
-            <label for="password">Password:</label>
-            <input type="password" id="password" required>
-        </div>
-        <button type="submit">Register</button>
-    </form>
-    <div class="login-link">
-        <p>Already have an account? <a href="/login">Login here</a></p>
-    </div>
-    <div id="message"></div>
-
-    <script>
-        document.getElementById('registerForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-
-            try {
-                const response = await fetch('/register', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ email, password })
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    localStorage.setItem('access_token', data.access_token);
-                    window.location.href = '/chat';
-                } else {
-                    const error = await response.json();
-                    document.getElementById('message').innerHTML = `<p style="color: red;">${error.detail}</p>`;
-                }
-            } catch (error) {
-                document.getElementById('message').innerHTML = '<p style="color: red;">Registration failed</p>';
-            }
+<body><h2>Register</h2>
+<form id="registerForm">
+<div class="form-group"><label>Email:</label><input type="email" id="email" required></div>
+<div class="form-group"><label>Password:</label><input type="password" id="password" required></div>
+<button type="submit">Register</button>
+</form>
+<div class="login-link"><p>Already have an account? <a href="/login">Login here</a></p></div>
+<div id="message"></div>
+<script>
+document.getElementById('registerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    try {
+        const response = await fetch('/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email, password})
         });
-    </script>
+        if (response.ok) {
+            const data = await response.json();
+            localStorage.setItem('access_token', data.access_token);
+            window.location.href = '/chat';
+        } else {
+            const error = await response.json();
+            document.getElementById('message').innerHTML = `<p style="color:red;">${error.detail}</p>`;
+        }
+    } catch (error) {
+        document.getElementById('message').innerHTML = '<p style="color:red;">Registration failed</p>';
+    }
+});
+</script>
 </body>
 </html>
         """)
-
-    # Create chat page with token handling
     with open("templates/chat.html", "w") as f:
         f.write("""
 <!DOCTYPE html>
 <html>
-<head>
-    <title>AI Companion - Chat</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-        #messages { height: 400px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
-        .message { margin: 5px 0; padding: 5px; }
-        .user { background-color: #e3f2fd; }
-        .ai { background-color: #f5f5f5; }
-        #input-form { display: flex; gap: 10px; }
-        #message-input { flex: 1; padding: 10px; }
-        button { padding: 10px 20px; }
-        #status { margin: 10px 0; }
-    </style>
+<head><title>AI Companion - Chat</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;padding:20px}
+#messages{height:400px;overflow-y:auto;border:1px solid #ccc;padding:10px;margin-bottom:10px}
+.message{margin:5px 0;padding:5px}.user{background-color:#e3f2fd}.ai{background-color:#f5f5f5}
+#input-form{display:flex;gap:10px}#message-input{flex:1;padding:10px}button{padding:10px 20px}
+#status{margin:10px 0}
+</style>
 </head>
 <body>
-    <h1>AI Companion Chat</h1>
-    <div id="status">Connecting...</div>
-    <div id="messages"></div>
-    <form id="input-form">
-        <input type="text" id="message-input" placeholder="Type your message..." required>
-        <button type="submit">Send</button>
-    </form>
-    <button id="interrupt-btn">Interrupt</button>
-
-    <script>
-        const token = localStorage.getItem('access_token');
-        if (!token) {
-            window.location.href = '/login';
-            exit;
-        }
-
-        const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
-
-        ws.onopen = () => {
-            document.getElementById('status').textContent = 'Connected';
-        };
-
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            const messagesDiv = document.getElementById('messages');
-
-            if (data.type === 'transcription') {
-                messagesDiv.innerHTML += `<div class="message user"><strong>You:</strong> ${data.text}</div>`;
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
-            } else if (data.type === 'response') {
-                messagesDiv.innerHTML += `<div class="message ai"><strong>AI:</strong> ${data.text}</div>`;
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
-            }
-        };
-
-        document.getElementById('input-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const input = document.getElementById('message-input');
-            const message = input.value.trim();
-
-            if (message) {
-                ws.send(JSON.stringify({
-                    type: 'text_message',
-                    text: message,
-                    session_id: 'default'
-                }));
-                input.value = '';
-            }
-        });
-
-        document.getElementById('interrupt-btn').addEventListener('click', () => {
-            ws.send(JSON.stringify({ type: 'interrupt' }));
-        });
-    </script>
+<h1>AI Companion Chat</h1>
+<div id="status">Connecting...</div>
+<div id="messages"></div>
+<form id="input-form">
+<input type="text" id="message-input" placeholder="Type your message..." required>
+<button type="submit">Send</button>
+</form>
+<button id="interrupt-btn">Interrupt</button>
+<script>
+const token = localStorage.getItem('access_token');
+if (!token) { window.location.href = '/login'; }
+const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
+ws.onopen = () => { document.getElementById('status').textContent = 'Connected'; };
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    const div = document.getElementById('messages');
+    if (data.type === 'transcription') {
+        div.innerHTML += `<div class="message user"><strong>You:</strong> ${data.text}</div>`;
+    } else if (data.type === 'response') {
+        div.innerHTML += `<div class="message ai"><strong>AI:</strong> ${data.text}</div>`;
+    }
+    div.scrollTop = div.scrollHeight;
+};
+document.getElementById('input-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('message-input');
+    const msg = input.value.trim();
+    if (msg) {
+        ws.send(JSON.stringify({type: 'text_message', text: msg, session_id: 'default'}));
+        input.value = '';
+    }
+});
+document.getElementById('interrupt-btn').addEventListener('click', () => {
+    ws.send(JSON.stringify({type: 'interrupt'}));
+});
+</script>
 </body>
 </html>
         """)
-
-    # Redirect root to login
     with open("templates/index.html", "w") as f:
-        f.write("""<meta http-equiv="refresh" content="0; url=/login" />""")
-
-    try:
-        torch.hub.load('snakers4/silero-vad', model='silero_vad', force_reload=False)
-    except:
-        pass
+        f.write('<meta http-equiv="refresh" content="0; url=/login" />')
     asyncio.create_task(process_message_queue())
-
-@app.get("/setup", response_class=HTMLResponse)
-async def setup_page_unprotected(request: Request):
-    return templates.TemplateResponse("setup.html", {"request": request})
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Server shutting down...")
 
 @app.get("/api/conversations")
-async def get_conversations(request: Request):
+async def get_conversations():
     conn = sqlite3.connect("companion.db")
     cur = conn.cursor()
     cur.execute("SELECT id, user_message, ai_message FROM conversations ORDER BY id DESC")
@@ -1367,7 +1063,7 @@ async def get_conversations(request: Request):
     return JSONResponse(content=data)
 
 @app.put("/api/conversations/{conv_id}")
-async def update_conversation(conv_id: int,  dict):
+async def update_conversation(conv_id: int, data: dict):
     try:
         conn = sqlite3.connect("companion.db")
         cur = conn.cursor()
@@ -1407,7 +1103,18 @@ async def delete_conversation(conv_id: int):
 async def crud_ui(request: Request):
     return templates.TemplateResponse("crud.html", {"request": request})
 
+# ==============================
+# MAIN ENTRY — Models loaded BEFORE server starts
+# ==============================
 if __name__ == "__main__":
     import uvicorn
+
+    # 🔥 Load all heavy models first
+    load_all_models()
+
+    # Start asyncio loop in background thread
     threading.Thread(target=lambda: asyncio.run(loop.run_forever()), daemon=True).start()
+
+    # Now start FastAPI server
+    logger.info("Starting FastAPI server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
