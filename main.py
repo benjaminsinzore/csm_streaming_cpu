@@ -39,6 +39,7 @@ from pathlib import Path
 
 
 from fastapi.responses import RedirectResponse
+from fastapi import status
 
 from fastapi import Response
 
@@ -913,11 +914,7 @@ class HTTPBearerOptional(HTTPBearer):
         try:
             return await super().__call__(request)
         except HTTPException:
-            # If header fails, try to get from query parameter
-            token = request.query_params.get("token")
-            if token:
-                return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-            # If query parameter fails, try to get from cookie
+            # If header fails, try to get from cookie
             token = request.cookies.get("access_token")
             if token:
                 return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
@@ -948,7 +945,6 @@ def get_current_user_optional(credentials: HTTPAuthorizationCredentials = Depend
 
 
 
-
 def get_current_user_required(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Required authentication - raises exception if not authenticated"""
     credentials_exception = HTTPException(
@@ -975,7 +971,6 @@ def get_current_user_required(credentials: HTTPAuthorizationCredentials = Depend
         return user
     except JWTError:
         raise credentials_exception
-    
 
 
 # Update the get_current_user function to handle both methods
@@ -1268,17 +1263,12 @@ async def register_page(request: Request):
 
 # Update your protected routes to handle authentication properly
 @app.get("/chat", response_class=HTMLResponse)
-async def chat_page(request: Request, current_user: User = Depends(get_current_user_optional)):
-    # If user is not authenticated, redirect to login
-    if not current_user:
-        return RedirectResponse(url="/login")
-    
+async def chat_page(request: Request, current_user: User = Depends(get_current_user_required)):
+    # This will automatically use the existing chat.html template
     return templates.TemplateResponse("chat.html", {
         "request": request, 
-        "user": current_user.email,
-        "token": create_access_token(data={"sub": current_user.email})  # Pass token to template
+        "user": current_user.email
     })
-
 
 
 # Add a simple root redirect
@@ -1289,7 +1279,6 @@ async def root():
 
 
 # Authentication routes
-
 @app.post("/token")
 async def login_for_access_token(response: Response, form_data: UserLogin):
     db = SessionLocal()
@@ -1298,7 +1287,7 @@ async def login_for_access_token(response: Response, form_data: UserLogin):
 
     if not user:
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
 
@@ -1314,8 +1303,8 @@ async def login_for_access_token(response: Response, form_data: UserLogin):
         samesite="lax"
     )
     
-    return {"access_token": access_token, "token_type": "bearer"}
-
+    # Return a redirect response instead of JSON
+    return RedirectResponse(url="/chat", status_code=status.HTTP_303_SEE_OTHER)
 
 
 
@@ -1328,7 +1317,7 @@ async def register_user(response: Response, user_data: UserCreate):
     if existing_user:
         db.close()
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists"
         )
 
@@ -1349,8 +1338,8 @@ async def register_user(response: Response, user_data: UserCreate):
         samesite="lax"
     )
     
-    return {"access_token": access_token, "token_type": "bearer"}
-
+    # Return a redirect response instead of JSON
+    return RedirectResponse(url="/chat", status_code=status.HTTP_303_SEE_OTHER)
 
 
 
@@ -1936,15 +1925,12 @@ async def process_message_queue():
         message_queue.task_done()
 
 @app.get("/setup", response_class=HTMLResponse)
-async def setup_page(request: Request, current_user: User = Depends(get_current_user_optional)):
-    # If user is not authenticated, redirect to login
-    if not current_user:
-        return RedirectResponse(url="/login")
-    
+async def setup_page(request: Request, current_user: User = Depends(get_current_user_required)):
     return templates.TemplateResponse("setup.html", {
         "request": request, 
         "user": current_user.email
     })
+
 
 @app.get("/debug/user")
 async def debug_user(current_user: User = Depends(get_current_user)):
