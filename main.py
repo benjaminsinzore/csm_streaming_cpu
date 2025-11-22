@@ -119,7 +119,21 @@ class UserLogin(BaseModel):
     email: str
     password: str
 
-# ... [rest of your code continues here] ...
+class CompanionConfig(BaseModel):
+    system_prompt: str
+    reference_audio_path: str
+    reference_text: str
+    reference_audio_path2: Optional[str] = None
+    reference_text2: Optional[str] = None
+    reference_audio_path3: Optional[str] = None
+    reference_text3: Optional[str] = None
+    model_path: str
+    llm_path: str
+    max_tokens: int = 8192
+    voice_speaker_id: int = 0
+    vad_enabled: bool = True
+    vad_threshold: float = 0.5
+    embedding_model: str = "all-MiniLM-L6-v2"
 
 # User authentication functions
 def verify_password(plain_password, hashed_password):
@@ -183,7 +197,7 @@ class SessionManager:
     def __init__(self):
         self.sessions = {}  # {token: {'connections': [], 'user_data': {}}}
     
-    def add_connection(self, token: str, websocket, user_ dict):
+    def add_connection(self, token: str, websocket, user_data: dict):
         if token not in self.sessions:
             self.sessions[token] = {'connections': [], 'user_data': user_data}
         self.sessions[token]['connections'].append(websocket)
