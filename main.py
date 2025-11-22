@@ -35,19 +35,15 @@ from datetime import datetime, timedelta
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pathlib import Path
-
 # JWT Configuration
 SECRET_KEY = "your-secret-key-change-this-in-production"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
-
 ##NEW APPROACH
 from pathlib import Path
-
 speaking_start_time = 0.0
 MIN_BARGE_LATENCY = 0.9
 speaker_counters = {
@@ -69,12 +65,10 @@ model_result_queue = queue.Queue()
 model_thread_running = threading.Event()
 llm_lock = threading.Lock()
 audio_gen_lock = threading.Lock()
-
 # Initialize Base after importing declarative_base
 Base = declarative_base()
 engine = create_engine("sqlite:///companion.db")
 SessionLocal = sessionmaker(bind=engine)
-
 # Database Models - Define these after Base is initialized
 class User(Base):
     __tablename__ = "users"
@@ -82,7 +76,6 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     created_at = Column(String, default=lambda: datetime.now().isoformat())
-
 class UserSession(Base):
     __tablename__ = "user_sessions"
     id = Column(Integer, primary_key=True, index=True)
@@ -90,7 +83,6 @@ class UserSession(Base):
     session_token = Column(String, unique=True, index=True)
     expires_at = Column(String)
     created_at = Column(String, default=lambda: datetime.now().isoformat())
-
 class Conversation(Base):
     __tablename__ = "conversations"
     id = Column(Integer, primary_key=True, index=True)
@@ -99,26 +91,20 @@ class Conversation(Base):
     user_message = Column(Text)
     ai_message = Column(Text)
     audio_path = Column(String)
-
 # Create all tables
 Base.metadata.create_all(bind=engine)
-
 # JWT Token Models
 class Token(BaseModel):
     access_token: str
     token_type: str
-
 class TokenData(BaseModel):
     email: str
-
 class UserCreate(BaseModel):
     email: str
     password: str
-
 class UserLogin(BaseModel):
     email: str
     password: str
-
 class CompanionConfig(BaseModel):
     system_prompt: str
     reference_audio_path: str
@@ -135,6 +121,53 @@ class CompanionConfig(BaseModel):
     vad_threshold: float = 0.5
     embedding_model: str = "all-MiniLM-L6-v2"
 
+# --- Updated Password Handling Functions ---
+def truncate_password_for_bcrypt(password: str) -> str:
+    """
+    Truncates a password string to ensure its UTF-8 byte representation
+    is 72 bytes or fewer, as required by bcrypt.
+
+    Args:
+        password: The input password string.
+
+    Returns:
+        The truncated password string.
+    """
+    # Encode the password to bytes
+    password_bytes = password.encode('utf-8')
+    # Check if the byte length exceeds 72
+    if len(password_bytes) > 72:
+        # Truncate the bytes to 72
+        truncated_bytes = password_bytes[:72]
+        # Decode back to string, handling potential incomplete multi-byte characters
+        # errors='ignore' removes incomplete characters, 'replace' uses a placeholder
+        # 'ignore' is often safer here to ensure byte length stays <= 72
+        truncated_password_str = truncated_bytes.decode('utf-8', errors='ignore')
+        logger.info(f"Password was too long for bcrypt, truncated from {len(password_bytes)} bytes to {len(truncated_password_str.encode('utf-8'))} bytes.")
+        return truncated_password_str
+    # If it's already within the limit, return the original
+    return password
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """
+    Verifies a plaintext password against a hashed password.
+    Ensures the plaintext password is truncated to 72 bytes UTF-8 before verification.
+    """
+    # Truncate the plain password to 72 bytes UTF-8 before verifying
+    truncated_password = truncate_password_for_bcrypt(plain_password)
+    # Use the truncated password for verification
+    return pwd_context.verify(truncated_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    """
+    Hashes a plaintext password.
+    Ensures the password is truncated to 72 bytes UTF-8 before hashing.
+    """
+    # Truncate the password to 72 bytes UTF-8 before hashing
+    truncated_password = truncate_password_for_bcrypt(password)
+    # Hash the truncated password
+    return pwd_context.hash(truncated_password)
+
 # Global variables for models
 whisper_model = None
 processor = None
@@ -145,7 +178,6 @@ rag = None
 vad_processor = None
 config = None
 models_loaded = False  # Flag to track if models are loaded
-
 conversation_history = []
 audio_queue = queue.Queue()
 is_speaking = False
@@ -153,25 +185,12 @@ interrupt_flag = threading.Event()
 reference_segments = []
 active_connections = []
 message_queue = asyncio.Queue()
-
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
-
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
-
-# User authentication functions
-def verify_password(plain_password, hashed_password):
-    # Truncate plain_password before verifying if needed
-    truncated_password = plain_password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
-    return pwd_context.verify(truncated_password, hashed_password)
-
-def get_password_hash(password):
-    # Truncate password before hashing if needed
-    truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
-    return pwd_context.hash(truncated_password)
 
 def create_user(db, email: str, password: str):
     hashed_password = get_password_hash(password)
@@ -190,9 +209,10 @@ def authenticate_user(db, email: str, password: str):
         # To prevent timing attacks, we should still call verify_password even if user doesn't exist
         verify_password("dummy_password", "dummy_hash") # Simulate verification time
         return None
-    # Truncate the provided password before verifying
-    truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
-    if not verify_password(truncated_password, user.hashed_password):
+    # Truncate the provided password before verifying (redundant call here if already handled by verify_password directly,
+    # but kept for consistency if the original call path changes)
+    # Note: The verify_password function now handles truncation internally.
+    if not verify_password(password, user.hashed_password):
         return None
     return user
 
@@ -203,7 +223,7 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     else:
         expire = datetime.now() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire.timestamp()})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithms=[ALGORITHM])
     return encoded_jwt
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -220,11 +240,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         token_data = TokenData(email=email)
     except JWTError:
         raise credentials_exception
-
     db = SessionLocal()
     user = get_user_by_email(db, email=email)
     db.close()
-
     if user is None:
         raise credentials_exception
     return user
@@ -233,50 +251,39 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 class SessionManager:
     def __init__(self):
         self.sessions = {}  # {token: {'connections': [], 'user_data': {}}}
-
     def add_connection(self, token: str, websocket, user_data: dict):
         if token not in self.sessions:
             self.sessions[token] = {'connections': [], 'user_data': user_data}
         self.sessions[token]['connections'].append(websocket)
-
     def remove_connection(self, token: str, websocket):
         if token in self.sessions:
             self.sessions[token]['connections'].remove(websocket)
             if not self.sessions[token]['connections']:
                 del self.sessions[token]
-
     def get_user_connections(self, token: str):
         return self.sessions.get(token, {}).get('connections', [])
-
 session_manager = SessionManager()
 
 def load_whisper_model():
     """Load Whisper model for speech recognition"""
     global whisper_model, processor, whisper_pipe
-    
     logger.info("Loading Whisper model...")
-    
     # Find the exact snapshot path
     cache_dir = Path.home() / '.cache' / 'huggingface' / 'hub'
     model_cache_dir = cache_dir / 'models--openai--whisper-large-v3-turbo' / 'snapshots'
-
     # Get all snapshots and use the first one
     snapshots = list(model_cache_dir.iterdir())
     if not snapshots:
         raise ValueError("No model snapshots found in cache!")
-
     # Use the first snapshot (usually the only one or most recent)
     snapshot_path = snapshots[0]
     logger.info(f"Using Whisper model from: {snapshot_path}")
-
     # Verify config.json exists
     config_path = snapshot_path / "config.json"
     if not config_path.exists():
         raise FileNotFoundError(f"config.json not found at {config_path}")
-
     # Load using the direct local path
     model_id = str(snapshot_path)
-
     whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
         model_id,
         torch_dtype=torch.float32,
@@ -285,12 +292,10 @@ def load_whisper_model():
         local_files_only=True
     )
     whisper_model.to("cpu")
-
     processor = AutoProcessor.from_pretrained(
         model_id,
         local_files_only=True
     )
-
     whisper_pipe = pipeline(
         "automatic-speech-recognition",
         model=whisper_model,
@@ -299,7 +304,6 @@ def load_whisper_model():
         torch_dtype=torch.float32,
         device=-1,  # Use CPU
     )
-    
     logger.info("Whisper model loaded successfully")
 
 def load_reference_segments(config_data: CompanionConfig):
@@ -343,13 +347,10 @@ def transcribe_audio(audio_data, sample_rate):
 def initialize_models(config_data: CompanionConfig):
     global generator, llm, rag, vad_processor, config, models_loaded
     config = config_data
-    
     logger.info("Loading LLM...")
     llm = LLMInterface(config_data.llm_path, config_data.max_tokens)
-    
     logger.info("Loading RAG...")
     rag = RAGSystem("companion.db", model_name=config_data.embedding_model)
-    
     logger.info("Loading VAD model...")
     vad_model, vad_utils = torch.hub.load('snakers4/silero-vad', model='silero_vad', force_reload=False)
     vad_processor = AudioStreamProcessor(
@@ -359,10 +360,8 @@ def initialize_models(config_data: CompanionConfig):
         vad_threshold=config_data.vad_threshold,
         callbacks={"on_speech_start": on_speech_start, "on_speech_end": on_speech_end},
     )
-    
     load_reference_segments(config_data)
     start_model_thread()
-    
     logger.info("Warming up voice model...")
     t0 = time.time()
     model_queue.put((
@@ -373,7 +372,6 @@ def initialize_models(config_data: CompanionConfig):
         if r is None:
             break
     logger.info(f"Voice model ready in {time.time() - t0:.1f}s")
-    
     models_loaded = True
     logger.info("All models initialized successfully")
 
@@ -413,7 +411,6 @@ def on_speech_end(audio_data, sample_rate):
         logger.error(f"VAD callback failed: {e}")
 
 # ... (rest of your functions remain the same - process_pending_inputs, process_user_input, model_worker, etc.)
-
 def process_pending_inputs():
     global pending_user_inputs, is_speaking, interrupt_flag
     time.sleep(0.2)
@@ -457,7 +454,7 @@ def process_user_input(user_text, session_id="default"):
     rag_context = rag.query(user_text)
     system_prompt = config.system_prompt
     if rag_context:
-        system_prompt += f"\n\nRelevant context:\n{rag_context}"
+        system_prompt += f"\nRelevant context:\n{rag_context}"
     asyncio.run_coroutine_threadsafe(
         message_queue.put({"type": "status", "message": "Thinking..."}),
         loop
@@ -520,7 +517,7 @@ def model_worker(cfg: CompanionConfig):
     global generator, model_thread_running
     logger.info("Model worker thread started")
     if generator is None:
-        logger.info("Loading voice model inside worker thread …")
+        logger.info("Loading voice model inside worker thread...")
         generator = load_csm_1b_local(cfg.model_path, "cpu")
         logger.info("Voice model ready")
     while model_thread_running.is_set():
@@ -558,7 +555,6 @@ def start_model_thread():
     logger.info("Started dedicated model worker thread")
 
 # ... (rest of your functions remain the same - send_to_all_clients, save_audio_and_trim, add_segment, etc.)
-
 saved_audio_paths = {
     "default": {
         0: [],
@@ -566,7 +562,6 @@ saved_audio_paths = {
     }
 }
 MAX_AUDIO_FILES = 8
-
 def save_audio_and_trim(path, session_id, speaker_id, tensor, sample_rate):
     torchaudio.save(path, tensor.unsqueeze(0), sample_rate)
     saved_audio_paths.setdefault(session_id, {}).setdefault(speaker_id, []).append(path)
@@ -586,7 +581,6 @@ def save_audio_and_trim(path, session_id, speaker_id, tensor, sample_rate):
                 logger.info(f"Removed old audio file from other speaker: {old_path}")
 
 MAX_SEGMENTS = 8
-
 def add_segment(text, speaker_id, audio_tensor):
     global reference_segments, generator, config
     num_reference_segments = 1
@@ -597,13 +591,17 @@ def add_segment(text, speaker_id, audio_tensor):
     new_segment = Segment(text=text, speaker=speaker_id, audio=audio_tensor)
     protected_segments = reference_segments[:num_reference_segments] if len(reference_segments) >= num_reference_segments else reference_segments.copy()
     dynamic_segments = reference_segments[num_reference_segments:] if len(reference_segments) > num_reference_segments else []
+
     dynamic_segments.append(new_segment)
+
     while len(protected_segments) + len(dynamic_segments) > MAX_SEGMENTS:
         if dynamic_segments:
             dynamic_segments.pop(0)
         else:
             break
+
     reference_segments = protected_segments + dynamic_segments
+
     if hasattr(generator, '_text_tokenizer'):
         total_tokens = 0
         for segment in reference_segments:
@@ -612,6 +610,7 @@ def add_segment(text, speaker_id, audio_tensor):
             if segment.audio is not None:
                 audio_frames = segment.audio.size(0) // 285
                 total_tokens += audio_frames
+
         while dynamic_segments and total_tokens > 2048:
             removed = dynamic_segments.pop(0)
             reference_segments.remove(removed)
@@ -620,6 +619,7 @@ def add_segment(text, speaker_id, audio_tensor):
                 removed_audio_frames = removed.audio.size(0) // 285
                 removed_tokens += removed_audio_frames
             total_tokens -= removed_tokens
+
         logger.info(f"Segments: {len(reference_segments)} ({len(protected_segments)} protected, {len(dynamic_segments)} dynamic), total tokens: {total_tokens}/2048")
     else:
         logger.warning("Unable to access tokenizer - falling back to word-based estimation")
@@ -632,12 +632,15 @@ def add_segment(text, speaker_id, audio_tensor):
                 audio_frames = segment.audio.size(0) // 300
                 audio_tokens = audio_frames
             return text_tokens + audio_tokens
+
         total_estimated_tokens = sum(estimate_tokens(segment) for segment in reference_segments)
+
         while dynamic_segments and total_estimated_tokens > 2048:
             removed = dynamic_segments.pop(0)
             idx = reference_segments.index(removed)
             reference_segments.pop(idx)
             total_estimated_tokens -= estimate_tokens(removed)
+
         logger.info(f"Segments: {len(reference_segments)} ({len(protected_segments)} protected, {len(dynamic_segments)} dynamic), estimated tokens: {total_estimated_tokens}/2048")
 
 def preprocess_text_for_tts(text):
@@ -765,6 +768,7 @@ def audio_generation_thread(text, output_file):
             except Exception as e:
                 logger.error(f"Audio generation {this_id} - error processing result: {e}")
                 break
+
         if all_audio_chunks and not interrupt_flag.is_set():
             try:
                 complete_audio = torch.cat(all_audio_chunks)
@@ -794,10 +798,12 @@ def audio_generation_thread(text, output_file):
             )
         except Exception as e:
             logger.error(f"Audio generation {this_id} - failed to send completion status: {e}")
+
         with user_input_lock:
             if pending_user_inputs:
                 logger.info(f"Audio generation {this_id} - processing pending inputs")
                 process_pending_inputs()
+
         logger.info(f"Audio generation {this_id} - releasing lock")
         audio_gen_lock.release()
 
@@ -807,6 +813,7 @@ def handle_interrupt(websocket):
     current_time = time.time()
     time_since_speech_start = current_time - speaking_start_time if speaking_start_time > 0 else 999
     time_since_last_interrupt = current_time - last_interrupt_time
+
     if time_since_last_interrupt < interrupt_cooldown and time_since_speech_start > 3.0:
         logger.info(f"Ignoring interrupt: too soon after previous interrupt ({time_since_last_interrupt:.1f}s < {interrupt_cooldown}s)")
         asyncio.run_coroutine_threadsafe(
@@ -819,7 +826,9 @@ def handle_interrupt(websocket):
             loop
         )
         return False
+
     last_interrupt_time = current_time
+
     if is_speaking or not model_result_queue.empty():
         logger.info("Interruption processing: we are speaking or generating")
         interrupt_flag.set()
@@ -844,12 +853,14 @@ def handle_interrupt(websocket):
             logger.info("Audio queue cleared")
         except Exception as e:
             logger.error(f"Error clearing audio queue: {e}")
+
         if vad_processor:
             try:
                 vad_processor.reset()
                 logger.info("VAD processor reset")
             except Exception as e:
                 logger.error(f"Error resetting VAD: {e}")
+
         if model_thread and model_thread.is_alive():
             try:
                 model_thread_running.clear()
@@ -859,23 +870,22 @@ def handle_interrupt(websocket):
                 logger.info("Model thread restarted")
             except Exception as e:
                 logger.error(f"Error restarting model thread: {e}")
+
         return True
+
     logger.info("No active speech to interrupt")
     return False
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str = None):
     global config, vad_processor
-    
     # Check if models are loaded
     if not models_loaded:
         await websocket.close(code=1013)  # Try again later
         return
-        
     if not token:
         await websocket.close(code=1008)  # Policy violation
         return
-
     # Verify token
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -886,13 +896,10 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
     except JWTError:
         await websocket.close(code=1008)
         return
-
     await websocket.accept()
-
     # Add to session manager with user-specific data
     user_data = {"email": email, "conversation_history": []}
     session_manager.add_connection(token, websocket, user_data)
-
     # Load saved config for this user
     saved = config_manager.load_config()
     if saved:
@@ -922,14 +929,12 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                 except Exception as e:
                     logger.error(f"Error processing config: {str(e)}")
                     await websocket.send_json({"type": "error", "message": f"Configuration error: {str(e)}"})
-
             elif data["type"] == "request_saved_config":
                 saved = config_manager.load_config()
                 await websocket.send_json({"type": "saved_config", "config": saved})
             elif data["type"] == "text_message":
                 user_text = data["text"]
                 session_id = data.get("session_id", "default")
-
                 logger.info(f"TEXT-MSG from client: {user_text!r}")
                 if is_speaking:
                     with user_input_lock:
@@ -937,7 +942,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                             pending_user_inputs = pending_user_inputs[-2:]
                         pending_user_inputs.append((user_text, session_id))
                     await websocket.send_json(
-                        {"type": "status", "message": "Queued – I'll answer in a moment"})
+                        {"type": "status", "message": "Queued ... I'll answer in a moment"})
                     continue
                 await message_queue.put({"type": "transcription", "text": user_text})
                 threading.Thread(
@@ -1020,20 +1025,17 @@ async def login_for_access_token(form_data: UserLogin):
     db = SessionLocal()
     user = authenticate_user(db, form_data.email, form_data.password)
     db.close()
-
     if not user:
         raise HTTPException(
             status_code=401,
             detail="Incorrect email or password"
         )
-
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/register")
 async def register_user(user_data: UserCreate):
     db = SessionLocal()
-
     # Check if user already exists
     existing_user = get_user_by_email(db, user_data.email)
     if existing_user:
@@ -1042,11 +1044,9 @@ async def register_user(user_data: UserCreate):
             status_code=400,
             detail="User with this email already exists"
         )
-
     # Create new user
     user = create_user(db, user_data.email, user_data.password)
     db.close()
-
     # Create access token
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
@@ -1055,22 +1055,18 @@ async def register_user(user_data: UserCreate):
 async def startup_event():
     """Initialize all models and resources before the application starts"""
     logger.info("Starting application initialization...")
-    
     # Create tables if they don't exist
     Base.metadata.create_all(bind=engine)
-
     # Create necessary directories
     os.makedirs("static", exist_ok=True)
     os.makedirs("audio/user", exist_ok=True)
     os.makedirs("audio/ai", exist_ok=True)
     os.makedirs("embeddings_cache", exist_ok=True)
     os.makedirs("templates", exist_ok=True)
-
     # Load core models sequentially
     try:
         # 1. Load Whisper model first
         load_whisper_model()
-        
         # 2. Load other models from saved config if available
         saved_config = config_manager.load_config()
         if saved_config:
@@ -1084,24 +1080,19 @@ async def startup_event():
                 logger.info("Application will start with Whisper model only")
         else:
             logger.info("No saved configuration found. Application will start with Whisper model only")
-            
     except Exception as e:
         logger.error(f"Failed to load models during startup: {e}")
         # Don't raise the exception - let the application start with limited functionality
         logger.warning("Application starting with limited functionality due to model loading errors")
-
     # Create HTML templates
     create_html_templates()
-    
     # Preload VAD model in background
     try:
         torch.hub.load('snakers4/silero-vad', model='silero_vad', force_reload=False)
     except Exception as e:
         logger.warning(f"Could not preload VAD model: {e}")
-
     # Start message queue processing
     asyncio.create_task(process_message_queue())
-    
     logger.info("Application startup completed")
 
 def create_html_templates():
@@ -1139,13 +1130,11 @@ def create_html_templates():
         <p>Don't have an account? <a href="/register">Register here</a></p>
     </div>
     <div id="message"></div>
-
     <script>
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
-
             try {
                 const response = await fetch('/token', {
                     method: 'POST',
@@ -1154,7 +1143,6 @@ def create_html_templates():
                     },
                     body: JSON.stringify({ email, password })
                 });
-
                 if (response.ok) {
                     const data = await response.json();
                     localStorage.setItem('access_token', data.access_token);
@@ -1171,7 +1159,6 @@ def create_html_templates():
 </body>
 </html>
         """)
-
     # Create register page
     with open("templates/register.html", "w") as f:
         f.write("""
@@ -1205,13 +1192,11 @@ def create_html_templates():
         <p>Already have an account? <a href="/login">Login here</a></p>
     </div>
     <div id="message"></div>
-
     <script>
         document.getElementById('registerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
-
             try {
                 const response = await fetch('/register', {
                     method: 'POST',
@@ -1220,7 +1205,6 @@ def create_html_templates():
                     },
                     body: JSON.stringify({ email, password })
                 });
-
                 if (response.ok) {
                     const data = await response.json();
                     localStorage.setItem('access_token', data.access_token);
@@ -1237,7 +1221,6 @@ def create_html_templates():
 </body>
 </html>
         """)
-
     # Create chat page with token handling
     with open("templates/chat.html", "w") as f:
         f.write("""
@@ -1266,24 +1249,19 @@ def create_html_templates():
         <button type="submit">Send</button>
     </form>
     <button id="interrupt-btn">Interrupt</button>
-
     <script>
         const token = localStorage.getItem('access_token');
         if (!token) {
             window.location.href = '/login';
             exit;
         }
-
         const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
-
         ws.onopen = () => {
             document.getElementById('status').textContent = 'Connected';
         };
-
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             const messagesDiv = document.getElementById('messages');
-
             if (data.type === 'transcription') {
                 messagesDiv.innerHTML += `<div class="message user"><strong>You:</strong> ${data.text}</div>`;
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -1292,12 +1270,10 @@ def create_html_templates():
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
             }
         };
-
         document.getElementById('input-form').addEventListener('submit', (e) => {
             e.preventDefault();
             const input = document.getElementById('message-input');
             const message = input.value.trim();
-
             if (message) {
                 ws.send(JSON.stringify({
                     type: 'text_message',
@@ -1307,7 +1283,6 @@ def create_html_templates():
                 input.value = '';
             }
         });
-
         document.getElementById('interrupt-btn').addEventListener('click', () => {
             ws.send(JSON.stringify({ type: 'interrupt' }));
         });
@@ -1315,7 +1290,6 @@ def create_html_templates():
 </body>
 </html>
         """)
-
     # Redirect root to login
     with open("templates/index.html", "w") as f:
         f.write("""<meta http-equiv="refresh" content="0; url=/login" />""")
@@ -1395,7 +1369,6 @@ async def crud_ui(request: Request):
 if __name__ == "__main__":
     import uvicorn
     threading.Thread(target=lambda: asyncio.run(loop.run_forever()), daemon=True).start()
-    
     # Start the server only after models are loaded
     logger.info("Starting Uvicorn server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
