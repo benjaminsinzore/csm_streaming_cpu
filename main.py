@@ -28,6 +28,7 @@ from rag_system import RAGSystem
 from vad import AudioStreamProcessor
 from pydantic import BaseModel
 import logging
+import bcrypt
 from config import ConfigManager
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import re
@@ -42,7 +43,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+#pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
 ##NEW APPROACH
@@ -162,26 +163,44 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
 
+# Replace the existing password functions with these:
 
-# Change this line at the top of your file:
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
-
-# Then use these simplified password functions:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash using Argon2."""
+    """Verify a password against its hash using bcrypt directly."""
     try:
-        return pwd_context.verify(plain_password, hashed_password)
+        if isinstance(plain_password, str):
+            # Encode to bytes and ensure it's not too long
+            password_bytes = plain_password.encode('utf-8')
+            if len(password_bytes) > 72:
+                password_bytes = password_bytes[:72]
+        else:
+            password_bytes = plain_password
+            
+        # Verify using bcrypt directly
+        return bcrypt.checkpw(password_bytes, hashed_password.encode('utf-8'))
     except Exception as e:
         logger.error(f"Password verification error: {e}")
         return False
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using Argon2."""
+    """Hash a password using bcrypt directly."""
     try:
-        return pwd_context.hash(password)
+        if isinstance(password, str):
+            # Encode to bytes and ensure it's not too long
+            password_bytes = password.encode('utf-8')
+            if len(password_bytes) > 72:
+                password_bytes = password_bytes[:72]
+        else:
+            password_bytes = password
+            
+        # Hash using bcrypt with reasonable rounds
+        hashed = bcrypt.hashpw(password_bytes, bcrypt.gensalt(rounds=12))
+        return hashed.decode('utf-8')
     except Exception as e:
         logger.error(f"Password hashing error: {e}")
         raise HTTPException(status_code=500, detail="Failed to process password")
+
+
 def create_user(db, email: str, password: str):
     hashed_password = get_password_hash(password)
     user = User(email=email, hashed_password=hashed_password)
