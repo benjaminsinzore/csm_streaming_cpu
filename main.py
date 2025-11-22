@@ -310,7 +310,7 @@ async def process_message_queue():
                     active_connections.remove(client)
         message_queue.task_done()
 
-def load_reference_segments(config_ CompanionConfig):
+def load_reference_segments(config_data: CompanionConfig):
     global reference_segments
     reference_segments = []
     if os.path.isfile(config_data.reference_audio_path):
@@ -348,7 +348,7 @@ def transcribe_audio(audio_data, sample_rate):
     except:
         return "[Transcription error]"
 
-def initialize_models(config_ CompanionConfig):
+def initialize_models(config_data: CompanionConfig):
     global generator, llm, rag, vad_processor, config # Access global models
     config = config_data
     logger.info("Loading LLM …")
@@ -913,7 +913,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                     logger.info(f"Received config data keys: {config_data.keys()}")
                     for key in ["reference_audio_path", "reference_audio_path2", "reference_audio_path3",
                                 "reference_text", "reference_text2", "reference_text3"]:
-                        if key in config_
+                        if key in config_data: # Fixed: was 'config_'
                             logger.info(f"Config includes {key}: {config_data[key]}")
                         else:
                             logger.warning(f"Config missing {key}")
@@ -999,7 +999,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
                     vad_processor.reset()
     except WebSocketDisconnect:
         session_manager.remove_connection(token, websocket)
-
+        
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return RedirectResponse(url="/login")
@@ -1023,9 +1023,9 @@ async def setup_page(request: Request, current_user: User = Depends(get_current_
 
 # Authentication routes
 @app.post("/token")
-async def login_for_access_token(form_ UserLogin):
+async def login_for_access_token(form_data: UserLogin): # Fixed: 'form_data: UserLogin'
     db = SessionLocal()
-    user = authenticate_user(db, form_data.email, form_data.password)
+    user = authenticate_user(db, form_data.email, form_data.password) # Now 'form_data' is correctly defined
     db.close()
 
     if not user:
@@ -1038,11 +1038,11 @@ async def login_for_access_token(form_ UserLogin):
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/register")
-async def register_user(user_ UserCreate):
+async def register_user(user_data: UserCreate): # Fixed: 'user_data: UserCreate'
     db = SessionLocal()
 
     # Check if user already exists
-    existing_user = get_user_by_email(db, user_data.email)
+    existing_user = get_user_by_email(db, user_data.email) # Now 'user_data' is correctly defined
     if existing_user:
         db.close()
         raise HTTPException(
@@ -1051,12 +1051,13 @@ async def register_user(user_ UserCreate):
         )
 
     # Create new user
-    user = create_user(db, user_data.email, user_data.password)
+    user = create_user(db, user_data.email, user_data.password) # Now 'user_data' is correctly defined
     db.close()
 
     # Create access token
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
+
 
 def process_user_input_for_user_session(token: str, user_text: str, session_id: str):
     # This function should handle user input for a specific user session
