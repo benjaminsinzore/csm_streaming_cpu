@@ -14,6 +14,9 @@ import torchaudio
 import sounddevice as sd
 import numpy as np
 import whisper
+
+import uuid # Ensure this import is present at the top if not already there
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -904,31 +907,41 @@ def handle_interrupt(websocket):
 
 
 
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    
-    # Create or get session ID (could come from query params or create new)
+    # Create or get session ID (could come from query params like ?session_id=... or create new)
+    # We are no longer relying on a token for authentication here
     session_id = websocket.query_params.get("session_id") or str(uuid.uuid4())
-    
+
     # Add to session manager
     session_manager.add_connection(session_id, websocket, {
         "connected_at": time.time(),
-        "ip_address": websocket.client.host if websocket.client else "unknown"
+        "ip_address": getattr(websocket.client, 'host', 'unknown') # Use getattr for safety
     })
-    
     logger.info(f"New WebSocket connection for session: {session_id}")
-    
+
     try:
         while True:
-            data = await websocket.receive_json()
+            # Receive messages from the client if needed
+            # data = await websocket.receive_json()
             # Process messages using session_id for context
-            session_data = session_manager.get_session_data(session_id)
-            # ... rest of your WebSocket handling
+            # session_data = session_manager.get_session_data(session_id)
+            # ... rest of your message processing logic if applicable ...
+            # For just receiving messages:
+            data = await websocket.receive_json()
+            # Example: Process the received data (you need to implement this logic)
+            # await process_websocket_message(data, session_id)
+            # Or just wait without processing specific messages for now:
+            # await asyncio.sleep(1) # Example of non-blocking wait if no messages expected immediately
+
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session: {session_id}")
         session_manager.remove_connection(websocket)
-
+    except Exception as e:
+        logger.error(f"Error in WebSocket connection for session {session_id}: {e}")
+        session_manager.remove_connection(websocket) # Ensure cleanup on any error
 
 
 @app.get("/", response_class=HTMLResponse)
