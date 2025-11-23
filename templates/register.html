@@ -118,6 +118,12 @@
                 console.error('Registration error:', error);
             }
         });
+
+        // Clear any old tokens when arriving at register page
+        document.addEventListener('DOMContentLoaded', function() {
+            localStorage.removeItem('access_token');
+            console.log('Cleared tokens on register page');
+        });
     </script>
 </body>
 </html>

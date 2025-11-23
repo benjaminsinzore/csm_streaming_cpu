@@ -508,6 +508,81 @@
         connectWebSocket();
       }
     }
+
+
+    // Enhanced token validation that redirects immediately for expired tokens
+    function validateAndRedirect() {
+        const token = getToken();
+        
+        if (!token) {
+            console.log('No token found, redirecting to login');
+            redirectToLogin();
+            return false;
+        }
+        
+        // More thorough token validation
+        if (!isTokenValid(token)) {
+            console.log('Token invalid or expired, redirecting to login');
+            clearStoredToken();
+            redirectToLogin();
+            return false;
+        }
+        
+        return true;
+    }
+
+
+
+    function isTokenValid(token) {
+        try {
+            const parts = token.split('.');
+            if (parts.length !== 3) return false;
+            
+            const payload = JSON.parse(atob(parts[1]));
+            const now = Math.floor(Date.now() / 1000);
+            
+            // Check if token has expired
+            if (payload.exp && payload.exp < now) {
+                console.log('Token expired at:', new Date(payload.exp * 1000));
+                return false;
+            }
+            
+            // Check if token has unreasonable expiration (like year 2025)
+            if (payload.exp && payload.exp > 2000000000) { // Year ~2033
+                console.log('Token has unreasonable expiration date:', new Date(payload.exp * 1000));
+                return false;
+            }
+            
+            return true;
+        } catch (e) {
+            console.log('Token validation error:', e);
+            return false;
+        }
+    }
+  
+
+    function redirectToLogin() {
+        // Clear everything and redirect
+        clearStoredToken();
+        window.location.href = '/login?message=session_expired';
+    }
+
+
+    // IMMEDIATE validation on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('Checking token validity...');
+        
+        if (!validateAndRedirect()) {
+            // Stop here if token is invalid
+            return;
+        }
+        
+        // Only initialize chat if token is valid
+        console.log('Token valid, initializing chat...');
+        initializeChat();
+    });
+
+  
   </script>
   
   <script src="/static/chat.js"></script>
