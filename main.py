@@ -1039,9 +1039,6 @@ async def startup_event():
         # Don't raise the exception - let the application start with limited functionality
         logger.warning("Application starting with limited functionality due to model loading errors")
 
-    # Create HTML templates
-    create_html_templates()
-    
     # Preload VAD model in background
     try:
         torch.hub.load('snakers4/silero-vad', model='silero_vad', force_reload=False)
