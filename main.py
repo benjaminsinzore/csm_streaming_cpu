@@ -1074,15 +1074,6 @@ async def setup_page(request: Request):
 
 
 
-@app.get("/debug/user")
-async def debug_user(current_user: User = Depends(get_current_user)):
-    """Debug endpoint to verify user authentication"""
-    return {
-        "email": current_user.email,
-        "id": current_user.id,
-        "authenticated": True
-    }
-
 
 @app.on_event("shutdown")
 async def shutdown_event():
