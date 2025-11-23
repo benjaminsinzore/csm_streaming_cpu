@@ -1100,7 +1100,6 @@ async def shutdown_event():
 async def login_user(user_data: UserLogin):
     db = SessionLocal()
     
-    # Simple email-based login
     user = authenticate_user(db, user_data.email, user_data.password)
     if not user:
         db.close()
@@ -1113,13 +1112,11 @@ async def login_user(user_data: UserLogin):
 
     logger.info(f"Login successful for {user.email}")
     
-    # Return success without token
     return {
         "message": "Login successful", 
         "email": user.email,
         "user_id": user.id
     }
-
 
 
 
