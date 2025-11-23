@@ -15,6 +15,8 @@ import sounddevice as sd
 import numpy as np
 import whisper
 
+import bcrypt
+
 import uuid # Ensure this import is present at the top if not already there
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
@@ -172,6 +174,21 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
+
+
+
+
+def get_password_hash(password: str) -> str:
+    # Using bcrypt for more secure password hashing
+    pwd_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
+    return hashed_password.decode('utf-8')
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    password_bytes = plain_password.encode('utf-8')
+    hashed_password_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password=password_bytes, hashed_password=hashed_password_bytes)
 
 
 def create_user(db, email: str, password: str):
