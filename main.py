@@ -486,18 +486,26 @@ def process_pending_inputs():
         user_text, session_id = latest_input
         process_user_input(user_text, session_id)
 
+
+
 def process_user_input(user_text, session_id="default"):
     global config, is_speaking, pending_user_inputs, interrupt_flag
+    
+    logger.info(f"process_user_input called with: '{user_text}', session: {session_id}")
+    
     if not user_text or user_text.strip() == "":
         logger.warning("Empty user input received, ignoring")
         return
+        
+    logger.info(f"Current state - is_speaking: {is_speaking}, pending_inputs: {len(pending_user_inputs)}")
+    
     interrupt_flag.clear()
     is_speaking = False
+    
     if is_speaking:
         logger.info(f"AI is currently speaking, adding input to pending queue: '{user_text}'")
         with user_input_lock:
             pending_user_inputs = [(user_text, session_id)]
-            logger.info(f"Added user input as the only pending input: '{user_text}'")
         if not interrupt_flag.is_set():
             logger.info("Automatically interrupting current speech for new input")
             interrupt_flag.set()
@@ -508,26 +516,40 @@ def process_user_input(user_text, session_id="default"):
             time.sleep(0.3)
             process_pending_inputs()
         return
+        
     interrupt_flag.clear()
     logger.info(f"Processing user input: '{user_text}'")
+    
+    # Get conversation context
     context = "\n".join([f"User: {msg['user']}\nAI: {msg['ai']}" for msg in conversation_history[-5:]])
-    rag_context = rag.query(user_text)
-    system_prompt = config.system_prompt
+    rag_context = rag.query(user_text) if rag else ""
+    
+    system_prompt = config.system_prompt if config else "You are a helpful AI assistant."
     if rag_context:
         system_prompt += f"\n\nRelevant context:\n{rag_context}"
+        
+    logger.info(f"System prompt prepared, context length: {len(context)}")
+    
+    # Send thinking status
     asyncio.run_coroutine_threadsafe(
         message_queue.put({"type": "status", "message": "Thinking..."}),
         loop
     )
+    
     try:
+        logger.info("Generating AI response...")
         with llm_lock:
             ai_response = llm.generate_response(system_prompt, user_text, context)
+        logger.info(f"AI response generated: '{ai_response[:100]}...'")
+        
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         conversation_history.append({
             "timestamp": timestamp,
             "user": user_text,
             "ai": ai_response
         })
+        
+        # Save to database
         try:
             db = SessionLocal()
             conv = Conversation(
@@ -539,39 +561,64 @@ def process_user_input(user_text, session_id="default"):
             )
             db.add(conv)
             db.commit()
+            
             index = speaker_counters[0]
             output_file = f"audio/ai/{session_id}_response_{index}.wav"
             speaker_counters[0] += 1
+            
             conv.audio_path = output_file
             db.commit()
             db.close()
+            logger.info(f"Conversation saved to database, audio path: {output_file}")
         except Exception as e:
             logger.error(f"Database error: {e}")
-        threading.Thread(target=lambda: rag.add_conversation(user_text, ai_response), daemon=True).start()
+            
+        # Add to RAG system
+        if rag:
+            threading.Thread(target=lambda: rag.add_conversation(user_text, ai_response), daemon=True).start()
+            
+        # Send response to client
         asyncio.run_coroutine_threadsafe(
             message_queue.put({"type": "audio_status", "status": "preparing"}),
             loop
         )
+        
         time.sleep(0.2)
+        
         asyncio.run_coroutine_threadsafe(
             message_queue.put({"type": "response", "text": ai_response}),
             loop
         )
+        
+        logger.info("Response sent to client, starting audio generation...")
+        
         time.sleep(0.5)
+        
         if is_speaking:
             logger.warning("Still speaking when trying to start new audio - forcing interrupt")
             interrupt_flag.set()
             is_speaking = False
             time.sleep(0.5)
+            
         interrupt_flag.clear()
         is_speaking = False
-        threading.Thread(target=lambda: audio_generation_thread(ai_response, output_file), daemon=True).start()
+        
+        # Start audio generation
+        threading.Thread(
+            target=lambda: audio_generation_thread(ai_response, output_file), 
+            daemon=True
+        ).start()
+        
     except Exception as e:
         logger.error(f"Error generating response: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         asyncio.run_coroutine_threadsafe(
             message_queue.put({"type": "error", "message": "Failed to generate response"}),
             loop
         )
+
+
 
 def model_worker(cfg: CompanionConfig):
     global generator, model_thread_running
@@ -928,37 +975,75 @@ def handle_interrupt(websocket):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    # Create or get session ID (could come from query params like ?session_id=... or create new)
-    # We are no longer relying on a token for authentication here
     session_id = websocket.query_params.get("session_id") or str(uuid.uuid4())
-
-    # Add to session manager
+    
     session_manager.add_connection(session_id, websocket, {
         "connected_at": time.time(),
-        "ip_address": getattr(websocket.client, 'host', 'unknown') # Use getattr for safety
+        "ip_address": getattr(websocket.client, 'host', 'unknown')
     })
     logger.info(f"New WebSocket connection for session: {session_id}")
 
     try:
         while True:
-            # Receive messages from the client if needed
-            # data = await websocket.receive_json()
-            # Process messages using session_id for context
-            # session_data = session_manager.get_session_data(session_id)
-            # ... rest of your message processing logic if applicable ...
-            # For just receiving messages:
+            # Receive and process messages from client
             data = await websocket.receive_json()
-            # Example: Process the received data (you need to implement this logic)
-            # await process_websocket_message(data, session_id)
-            # Or just wait without processing specific messages for now:
-            # await asyncio.sleep(1) # Example of non-blocking wait if no messages expected immediately
+            logger.info(f"Received WebSocket message type: {data.get('type')}")
+            
+            message_type = data.get("type")
+            
+            if message_type == "text_message":  # This matches your frontend
+                user_text = data.get("text", "").strip()
+                if user_text:
+                    logger.info(f"Processing text input: '{user_text}'")
+                    # Process the text input
+                    threading.Thread(
+                        target=lambda: process_user_input(user_text, session_id), 
+                        daemon=True
+                    ).start()
+                else:
+                    logger.warning("Received empty text input")
+                    
+            elif message_type == "interrupt":
+                logger.info("Interrupt request received from client")
+                handle_interrupt(websocket)
+                
+            elif message_type == "audio":
+                # Handle audio data if needed
+                logger.debug("Audio data received")
+                
+            elif message_type == "request_saved_config":
+                logger.info("Client requested saved config")
+                # Send current config back to client if needed
 
+            elif message_type == "test":
+                logger.info(f"Test message received: {data.get('message')}")
+                # Send a response back to confirm
+                await websocket.send_json({
+                    "type": "test_response", 
+                    "message": "Test successful - backend is receiving messages",
+                    "session_id": session_id
+                })
+                
+            else:
+                logger.warning(f"Unknown message type: {message_type}")
+                
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session: {session_id}")
         session_manager.remove_connection(websocket)
     except Exception as e:
-        logger.error(f"Error in WebSocket connection for session {session_id}: {e}")
-        session_manager.remove_connection(websocket) # Ensure cleanup on any error
+        logger.error(f"Error in WebSocket connection: {e}")
+        session_manager.remove_connection(websocket)
+
+
+@app.get("/api/debug/models")
+async def debug_models():
+    return {
+        "models_loaded": models_loaded,
+        "whisper_loaded": whisper_model is not None,
+        "llm_loaded": llm is not None,
+        "rag_loaded": rag is not None,
+        "config_loaded": config is not None
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1117,6 +1202,36 @@ async def login_user(user_data: UserLogin):
         "email": user.email,
         "user_id": user.id
     }
+
+
+@app.get("/api/status")
+async def get_system_status():
+    return {
+        "models_loaded": models_loaded,
+        "whisper_loaded": whisper_model is not None,
+        "llm_loaded": llm is not None,
+        "rag_loaded": rag is not None,
+        "vad_loaded": vad_processor is not None,
+        "config_loaded": config is not None
+    }
+
+
+
+
+@app.get("/test")
+async def test_endpoint():
+    return {"status": "Server is running", "timestamp": datetime.now().isoformat()}
+
+
+
+@app.post("/test-text")
+async def test_text_input(data: dict):
+    user_text = data.get("text", "")
+    if user_text:
+        # Process directly without WebSocket
+        threading.Thread(target=lambda: process_user_input(user_text, "test"), daemon=True).start()
+        return {"status": "processing", "text": user_text}
+    return {"status": "error", "message": "No text provided"}
 
 
 

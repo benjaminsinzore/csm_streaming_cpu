@@ -100,6 +100,8 @@ function addMessageToConversation(sender,text){
 }
 
 function connectWebSocket() {
+
+  
   if (reconnecting && reconnectAttempts >= maxReconnectAttempts) {
     console.error("Maximum reconnect attempts reached. Please refresh the page.");
     showNotification("Connection lost. Please refresh the page.", "error");
@@ -182,6 +184,37 @@ function connectWebSocket() {
   };
 }
 
+
+
+// Add this function to test the WebSocket connection
+function testConnection() {
+  console.log("=== TESTING CONNECTION ===");
+  console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
+  console.log("Session ID:", SESSION_ID);
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    // Send a test message
+    const testMsg = {
+      type: 'test',
+      message: 'Connection test',
+      session_id: SESSION_ID,
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log("Sending test message:", testMsg);
+    ws.send(JSON.stringify(testMsg));
+    showNotification("Test message sent", "info");
+  } else {
+    console.error("WebSocket not connected");
+    showNotification("WebSocket not connected", "error");
+  }
+}
+
+// Call this function from browser console to test
+window.testConnection = testConnection;
+
+
+
 function sendTextMessage(txt) {
   if (!txt.trim()) return;
   
@@ -189,6 +222,27 @@ function sendTextMessage(txt) {
     showNotification("Not connected", "error");
     return;
   }
+
+  console.log("=== SENDING TEXT MESSAGE ===");
+  console.log("Message:", txt);
+  console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
+
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.error("WebSocket not connected");
+    showNotification("Not connected to server", "error");
+    return;
+  }
+
+  // Create the message payload
+  const messageData = {
+    type: 'text_message',
+    text: txt,
+    session_id: SESSION_ID,
+    timestamp: new Date().toISOString()
+  };
+  
+  console.log("Sending message data:", messageData);
+  
   
   console.log("Force clearing all audio state before sending text message");
   
