@@ -1332,12 +1332,6 @@ async def chat_page(request: Request, current_user: User = Depends(get_current_u
     })
 
 
-# Add a simple root redirect
-@app.get("/")
-async def root():
-    return RedirectResponse(url="/login")
-
-
 
 # Authentication routes
 @app.post("/token")
@@ -1352,22 +1346,72 @@ async def login_for_access_token(response: Response, form_data: UserLogin):
             detail="Incorrect email or password"
         )
 
-    # Create a fresh token with proper expiration
-    access_token = create_access_token(data={"sub": user.email})
+    # Create token with explicit expiration
+    expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, 
+        expires_delta=expires_delta
+    )
     
-    logger.info(f"Login successful for {user.email}, token created")
+    # Debug logging
+    logger.info(f"Created new token for {user.email}, expires in {ACCESS_TOKEN_EXPIRE_MINUTES} minutes")
     
-    # Set the token as a cookie
+    # Decode and log token info for debugging
+    try:
+        payload = jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
+        exp_time = datetime.fromtimestamp(payload['exp'])
+        logger.info(f"Token expiration: {exp_time}")
+    except Exception as e:
+        logger.error(f"Error decoding new token: {e}")
+    
+    # Set cookie
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
-        max_age=30 * 60,  # 30 minutes
+        max_age=30 * 60,
         secure=False,
         samesite="lax"
     )
     
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.get("/api/token-status")
+async def token_status(request: Request):
+    """Debug endpoint to check token status"""
+    token = request.cookies.get("access_token")
+    
+    if not token:
+        return {"status": "no_token", "message": "No token found"}
+    
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        exp_time = datetime.fromtimestamp(payload['exp'])
+        now = datetime.now()
+        is_expired = exp_time < now
+        
+        return {
+            "status": "expired" if is_expired else "valid",
+            "email": payload.get("sub"),
+            "expires_at": exp_time.isoformat(),
+            "is_expired": is_expired,
+            "time_until_expiry": str(exp_time - now) if not is_expired else "EXPIRED"
+        }
+    except jwt.ExpiredSignatureError:
+        return {"status": "expired", "message": "Token has expired"}
+    except jwt.JWTError as e:
+        return {"status": "invalid", "message": f"Token invalid: {str(e)}"}
+
+
+
+@app.get("/")
+async def root():
+    # Force clear any cookies and redirect to login
+    response = RedirectResponse(url="/login")
+    response.delete_cookie("access_token")
+    return response
+
 
 @app.post("/register")
 async def register_user(response: Response, user_data: UserCreate):
