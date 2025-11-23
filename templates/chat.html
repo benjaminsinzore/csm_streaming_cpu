@@ -84,21 +84,6 @@
       top: 64px;
       bottom: 0;
     }
-
-    /* Token error styling */
-    .token-error {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(220, 38, 38, 0.9);
-      color: white;
-      padding: 2rem;
-      border-radius: 10px;
-      text-align: center;
-      z-index: 100;
-      backdrop-filter: blur(10px);
-    }
     
     /* Mobile layout */
     @media (max-width: 768px) {
@@ -122,23 +107,11 @@
 
   <div id="voice-circle"></div>
 
-  <!-- Token Error Overlay -->
-  <div id="tokenError" class="token-error hidden">
-    <div class="text-2xl mb-4">🔐 Authentication Required</div>
-    <div class="mb-4" id="tokenErrorMessage">Your session has expired or is invalid.</div>
-    <button onclick="handleTokenError()" class="bg-white text-red-600 px-6 py-2 rounded-lg font-semibold hover:bg-gray-100">
-      Go to Login
-    </button>
-  </div>
-
   <header class="header-container bg-gray-900 p-4 flex justify-between items-center shadow-md">
     <h1 class="text-2xl font-bold text-indigo-400">AI Companion</h1>
-    <div class="flex items-center space-x-4">
-      <span id="userWelcome" class="text-sm text-gray-300">Welcome, {{ user }}</span>
-      <button id="settingsBtn" class="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded shadow">
-        Settings
-      </button>
-    </div>
+    <button id="settingsBtn" class="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded shadow">
+      Settings
+    </button>
   </header>
 
   <div class="flex flex-row">
@@ -270,319 +243,139 @@
   </div>
 
   <script>
+    // Simple WebSocket connection without tokens
+    let ws = null;
 
-    function handleExpiredToken() {
-        // Clear any stored tokens
-        localStorage.removeItem('access_token');
-        
-        // Redirect to login page
-        window.location.href = '/login?message=session_expired';
-    }
-
-    function clearStoredToken() {
-        localStorage.removeItem('access_token');
-        console.log('Cleared stored access token');
-    }
-
-    // Call this when token errors occur
-    function handleTokenError() {
-        clearStoredToken();
-        window.location.href = '/login';
-    }    
-    
-
-    // Token handling functions
-    function getToken() {
-        let token = localStorage.getItem('access_token');
-        
-        // If token exists but is invalid, clear it
-        if (token && !validateToken(token)) {
-            console.log('Invalid token found, clearing...');
-            clearStoredToken();
-            return null;
-        }
-        
-        if (token) return token;
-        
-        // Try to extract from URL parameters
-        const urlParams = new URLSearchParams(window.location.search);
-        token = urlParams.get('token');
-        if (token) {
-            // Validate before storing
-            if (validateToken(token)) {
-                localStorage.setItem('access_token', token);
-                return token;
-            } else {
-                console.log('Invalid URL token, not storing');
-                return null;
-            }
-        }
-        
-        return null;
-    }
-    
-    
-    
-
-    function showTokenError(message) {
-      const tokenError = document.getElementById('tokenError');
-      const tokenErrorMessage = document.getElementById('tokenErrorMessage');
-      
-      tokenErrorMessage.textContent = message;
-      tokenError.classList.remove('hidden');
-      
-      // Disable all interactive elements
-      document.getElementById('micToggleBtn').disabled = true;
-      document.getElementById('textInput').disabled = true;
-      document.getElementById('sendTextBtn').disabled = true;
-      document.getElementById('settingsBtn').disabled = true;
-    }
-
-    function hideTokenError() {
-      const tokenError = document.getElementById('tokenError');
-      tokenError.classList.add('hidden');
-      
-      // Re-enable interactive elements
-      document.getElementById('micToggleBtn').disabled = false;
-      document.getElementById('textInput').disabled = false;
-      document.getElementById('sendTextBtn').disabled = false;
-      document.getElementById('settingsBtn').disabled = false;
-    }
-
-    function handleTokenError() {
-      // Clear stored token and redirect to login
-      localStorage.removeItem('access_token');
-      window.location.href = '/login';
-    }
-
-    function validateToken(token) {
-      if (!token) return false;
-      
+    function connectWebSocket() {
       try {
-        // Basic JWT validation - check if it's a properly formatted JWT
-        const parts = token.split('.');
-        if (parts.length !== 3) return false;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        ws = new WebSocket(wsUrl);
         
-        // Try to decode the payload to check expiration
-        const payload = JSON.parse(atob(parts[1]));
-        const now = Math.floor(Date.now() / 1000);
+        ws.onopen = () => {
+          console.log('WebSocket connected successfully');
+          document.getElementById('connectionStatus').textContent = 'Connected';
+          document.getElementById('connectionStatus').className = 'text-green-400';
+        };
         
-        if (payload.exp && payload.exp < now) {
-          return false; // Token expired
-        }
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleWebSocketMessage(data);
+          } catch (error) {
+            console.error('Error parsing message:', error);
+          }
+        };
         
-        return true;
-      } catch (e) {
-        return false;
+        ws.onclose = (event) => {
+          console.log('WebSocket closed:', event.code, event.reason);
+          document.getElementById('connectionStatus').textContent = 'Disconnected';
+          document.getElementById('connectionStatus').className = 'text-red-400';
+          
+          // Attempt reconnect after delay
+          setTimeout(connectWebSocket, 3000);
+        };
+        
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          document.getElementById('connectionStatus').textContent = 'Connection Error';
+          document.getElementById('connectionStatus').className = 'text-red-400';
+        };
+        
+        return ws;
+      } catch (error) {
+        console.error('Failed to create WebSocket:', error);
+        return null;
       }
     }
 
-    // Initialize token check when page loads
-    // Check token on page load
-    document.addEventListener('DOMContentLoaded', function() {
-        const token = getToken();
+    function handleWebSocketMessage(data) {
+      const messagesDiv = document.getElementById('conversationHistory');
+      
+      switch(data.type) {
+        case 'transcription':
+          addMessage('user', data.text);
+          break;
+        case 'response':
+          addMessage('ai', data.text);
+          break;
+        case 'status':
+          addMessage('status', data.message);
+          break;
+        case 'error':
+          addMessage('status', `Error: ${data.message}`);
+          break;
+        case 'audio_status':
+          if (data.status === 'generating') {
+            addMessage('status', 'AI is generating response...');
+          } else if (data.status === 'interrupted') {
+            addMessage('status', 'Response interrupted');
+          }
+          break;
+        default:
+          console.log('Unknown message type:', data.type);
+      }
+    }
 
-        if (token) {
-            // Validate the token format before using it
-            if (!validateToken(token)) {
-                console.log('Found invalid token, clearing...');
-                clearStoredToken();
-                showTokenError('Your session has expired. Please login again.');
-                return;
-            }
-        }
-
-        if (!token) {
-            showTokenError('Please login to continue.');
-            return;
-        }
-        
-        // Test the token by making a simple API call
-        fetch('/api/debug/token', {
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
-        })
-        .then(response => {
-            if (!response.ok) {
-                handleExpiredToken();
-            } else {
-                initializeChat();
-            }
-        })
-        .catch(error => {
-            handleExpiredToken();
-        });
-    });
+    function addMessage(type, text) {
+      const messagesDiv = document.getElementById('conversationHistory');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${type} p-3 rounded-lg`;
+      
+      let prefix = '';
+      let bgColor = '';
+      switch(type) {
+        case 'user': 
+          prefix = '<strong>You:</strong> ';
+          bgColor = 'bg-blue-900';
+          break;
+        case 'ai': 
+          prefix = '<strong>AI:</strong> ';
+          bgColor = 'bg-gray-800';
+          break;
+        case 'status': 
+          prefix = '<em>System:</em> ';
+          bgColor = 'bg-yellow-900';
+          break;
+      }
+      
+      messageDiv.className += ` ${bgColor}`;
+      messageDiv.innerHTML = prefix + text;
+      messagesDiv.appendChild(messageDiv);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
 
     function initializeChat() {
-      // Your existing chat initialization code goes here
-      console.log('Initializing chat with valid token...');
+      console.log('Initializing chat...');
+      connectWebSocket();
       
-      // Update connection status
-      document.getElementById('connectionStatus').textContent = 'Authenticated';
-      document.getElementById('connectionStatus').className = 'text-green-400';
-      
-      // Continue with your existing WebSocket connection and chat functionality
-      // This is where you would connect to your WebSocket endpoint
-    }
-
-    
-
-    // WebSocket connection with better token handling
-    function connectWebSocket() {
-        const token = getToken();
-        if (!token || !validateToken(token)) {
-            showTokenError('Cannot connect: Invalid or missing authentication token.');
-            return null;
+      // Set up text input handler
+      document.getElementById('sendTextBtn').addEventListener('click', sendTextMessage);
+      document.getElementById('textInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          sendTextMessage();
         }
-
-        try {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
-            const ws = new WebSocket(wsUrl);
-            
-            ws.onopen = () => {
-                console.log('WebSocket connected successfully');
-                hideTokenError();
-                document.getElementById('connectionStatus').textContent = 'Connected';
-                document.getElementById('connectionStatus').className = 'text-green-400';
-            };
-            
-            ws.onclose = (event) => {
-                console.log('WebSocket closed:', event.code, event.reason);
-                
-                if (event.code === 1008) { // Policy violation - authentication issues
-                    // Clear the bad token and show error
-                    clearStoredToken();
-                    showTokenError('Authentication failed. Please login again.');
-                } else if (event.code === 1013) { // Try again later
-                    document.getElementById('connectionStatus').textContent = 'Models Loading...';
-                    document.getElementById('connectionStatus').className = 'text-yellow-400';
-                    setTimeout(connectWebSocket, 5000);
-                } else {
-                    document.getElementById('connectionStatus').textContent = 'Disconnected';
-                    document.getElementById('connectionStatus').className = 'text-red-400';
-                    setTimeout(connectWebSocket, 3000);
-                }
-            };
-            
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'error' && data.message.includes('token')) {
-                        // Server sent a token error, clear local storage
-                        clearStoredToken();
-                        showTokenError(data.message);
-                    }
-                    handleWebSocketMessage(data);
-                } catch (error) {
-                    console.error('Error parsing message:', error);
-                }
-            };
-            
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                document.getElementById('connectionStatus').textContent = 'Connection Error';
-                document.getElementById('connectionStatus').className = 'text-red-400';
-            };
-            
-            return ws;
-        } catch (error) {
-            console.error('Failed to create WebSocket:', error);
-            showTokenError('Connection failed. Please check your network and try again.');
-            return null;
-        }
+      });
     }
 
+    function sendTextMessage() {
+      const input = document.getElementById('textInput');
+      const message = input.value.trim();
 
-    // Add logout functionality
-    function logout() {
-        clearStoredToken();
-        window.location.href = '/logout'; // This will clear server cookies too
-    }
-
-    // Call this when you're ready to establish WebSocket connection
-    function startWebSocket() {
-      if (validateToken(getToken())) {
-        connectWebSocket();
+      if (message && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'text_message',
+          text: message,
+          session_id: 'default'
+        }));
+        input.value = '';
       }
     }
 
-
-    // Enhanced token validation that redirects immediately for expired tokens
-    function validateAndRedirect() {
-        const token = getToken();
-        
-        if (!token) {
-            console.log('No token found, redirecting to login');
-            redirectToLogin();
-            return false;
-        }
-        
-        // More thorough token validation
-        if (!isTokenValid(token)) {
-            console.log('Token invalid or expired, redirecting to login');
-            clearStoredToken();
-            redirectToLogin();
-            return false;
-        }
-        
-        return true;
-    }
-
-
-
-    function isTokenValid(token) {
-        try {
-            const parts = token.split('.');
-            if (parts.length !== 3) return false;
-            
-            const payload = JSON.parse(atob(parts[1]));
-            const now = Math.floor(Date.now() / 1000);
-            
-            // Check if token has expired
-            if (payload.exp && payload.exp < now) {
-                console.log('Token expired at:', new Date(payload.exp * 1000));
-                return false;
-            }
-            
-            // Check if token has unreasonable expiration (like year 2025)
-            if (payload.exp && payload.exp > 2000000000) { // Year ~2033
-                console.log('Token has unreasonable expiration date:', new Date(payload.exp * 1000));
-                return false;
-            }
-            
-            return true;
-        } catch (e) {
-            console.log('Token validation error:', e);
-            return false;
-        }
-    }
-  
-
-    function redirectToLogin() {
-        // Clear everything and redirect
-        clearStoredToken();
-        window.location.href = '/login?message=session_expired';
-    }
-
-
-    // IMMEDIATE validation on page load
+    // Initialize when page loads
     document.addEventListener('DOMContentLoaded', function() {
-        console.log('Checking token validity...');
-        
-        if (!validateAndRedirect()) {
-            // Stop here if token is invalid
-            return;
-        }
-        
-        // Only initialize chat if token is valid
-        console.log('Token valid, initializing chat...');
-        initializeChat();
+      initializeChat();
     });
-
-  
   </script>
   
   <script src="/static/chat.js"></script>

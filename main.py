@@ -56,12 +56,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 import time
 
-# JWT Configuration - FIXED
-SECRET_KEY = "your-secret-key-change-this-in-production"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
-#pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
+
 
 ##NEW APPROACH
 from pathlib import Path
@@ -121,13 +116,8 @@ class Conversation(Base):
 # Create all tables
 Base.metadata.create_all(bind=engine)
 
-# JWT Token Models
-class Token(BaseModel):
-    access_token: str
-    token_type: str
 
-class TokenData(BaseModel):
-    email: str
+
 
 class UserCreate(BaseModel):
     email: str
@@ -180,43 +170,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
 
-# Replace the existing password functions with these:
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash using bcrypt directly."""
-    try:
-        if isinstance(plain_password, str):
-            # Encode to bytes and ensure it's not too long
-            password_bytes = plain_password.encode('utf-8')
-            if len(password_bytes) > 72:
-                password_bytes = password_bytes[:72]
-        else:
-            password_bytes = plain_password
-            
-        # Verify using bcrypt directly
-        return bcrypt.checkpw(password_bytes, hashed_password.encode('utf-8'))
-    except Exception as e:
-        logger.error(f"Password verification error: {e}")
-        return False
-
-def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt directly."""
-    try:
-        if isinstance(password, str):
-            # Encode to bytes and ensure it's not too long
-            password_bytes = password.encode('utf-8')
-            if len(password_bytes) > 72:
-                password_bytes = password_bytes[:72]
-        else:
-            password_bytes = password
-            
-        # Hash using bcrypt with reasonable rounds
-        hashed = bcrypt.hashpw(password_bytes, bcrypt.gensalt(rounds=12))
-        return hashed.decode('utf-8')
-    except Exception as e:
-        logger.error(f"Password hashing error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process password")
-
 
 def create_user(db, email: str, password: str):
     hashed_password = get_password_hash(password)
@@ -243,68 +196,94 @@ def authenticate_user(db, email: str, password: str):
 
 
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
-    to_encode = data.copy()
-    
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    
-    # Use proper datetime object for expiration
-    to_encode.update({"exp": expire})
-    
-    try:
-        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        logger.info(f"Created token expiring at: {expire}")
-        return encoded_jwt
-    except Exception as e:
-        logger.error(f"Error creating token: {e}")
-        raise
-
-
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-        token_data = TokenData(email=email)
-    except JWTError:
-        raise credentials_exception
-
-    db = SessionLocal()
-    user = get_user_by_email(db, email=email)
-    db.close()
-
-    if user is None:
-        raise credentials_exception
-    return user
-
-# Session management for WebSocket connections
 class SessionManager:
     def __init__(self):
-        self.sessions = {}  # {token: {'connections': [], 'user_data': {}}}
+        self.sessions = {}  # {session_id: {'connections': [], 'user_data': {}}}
+        self.connection_to_session = {}  # {websocket: session_id}
 
-    def add_connection(self, token: str, websocket, user_data: dict):
-        if token not in self.sessions:
-            self.sessions[token] = {'connections': [], 'user_data': user_data}
-        self.sessions[token]['connections'].append(websocket)
+    def create_session(self, session_id: str = None, user_data: dict = None):
+        """Create a new session"""
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+        
+        if session_id not in self.sessions:
+            self.sessions[session_id] = {
+                'connections': [], 
+                'user_data': user_data or {},
+                'created_at': time.time()
+            }
+        return session_id
 
-    def remove_connection(self, token: str, websocket):
-        if token in self.sessions:
-            self.sessions[token]['connections'].remove(websocket)
-            if not self.sessions[token]['connections']:
-                del self.sessions[token]
+    def add_connection(self, session_id: str, websocket, user_data: dict = None):
+        """Add a WebSocket connection to a session"""
+        if session_id not in self.sessions:
+            self.sessions[session_id] = {
+                'connections': [], 
+                'user_data': user_data or {},
+                'created_at': time.time()
+            }
+        
+        self.sessions[session_id]['connections'].append(websocket)
+        self.connection_to_session[websocket] = session_id
+        
+        # Update user data if provided
+        if user_data:
+            self.sessions[session_id]['user_data'].update(user_data)
 
-    def get_user_connections(self, token: str):
-        return self.sessions.get(token, {}).get('connections', [])
+    def remove_connection(self, websocket):
+        """Remove a WebSocket connection"""
+        session_id = self.connection_to_session.get(websocket)
+        if session_id and session_id in self.sessions:
+            if websocket in self.sessions[session_id]['connections']:
+                self.sessions[session_id]['connections'].remove(websocket)
+            
+            # Remove session if no connections left
+            if not self.sessions[session_id]['connections']:
+                del self.sessions[session_id]
+        
+        # Remove from connection mapping
+        if websocket in self.connection_to_session:
+            del self.connection_to_session[websocket]
+
+    def get_session_connections(self, session_id: str):
+        """Get all connections for a session"""
+        return self.sessions.get(session_id, {}).get('connections', [])
+
+    def get_connection_session(self, websocket):
+        """Get session ID for a connection"""
+        return self.connection_to_session.get(websocket)
+
+    def get_session_data(self, session_id: str):
+        """Get user data for a session"""
+        return self.sessions.get(session_id, {}).get('user_data', {})
+
+    def update_session_data(self, session_id: str, user_data: dict):
+        """Update user data for a session"""
+        if session_id in self.sessions:
+            self.sessions[session_id]['user_data'].update(user_data)
+
+    def cleanup_expired_sessions(self, max_age_seconds: int = 3600):
+        """Clean up sessions older than max_age_seconds"""
+        current_time = time.time()
+        expired_sessions = []
+        
+        for session_id, session_data in self.sessions.items():
+            if current_time - session_data['created_at'] > max_age_seconds:
+                expired_sessions.append(session_id)
+        
+        for session_id in expired_sessions:
+            # Close all connections in expired session
+            for websocket in self.sessions[session_id]['connections']:
+                try:
+                    asyncio.create_task(websocket.close())
+                except:
+                    pass
+                if websocket in self.connection_to_session:
+                    del self.connection_to_session[websocket]
+            del self.sessions[session_id]
+
+session_manager = SessionManager()
+
 
 session_manager = SessionManager()
 
@@ -922,386 +901,33 @@ def handle_interrupt(websocket):
     return False
 
 
-# Update the security scheme to handle both header and query parameters
-
-class HTTPBearerOptional(HTTPBearer):
-    async def __call__(self, request: Request):
-        # Try to get token from header first
-        try:
-            return await super().__call__(request)
-        except HTTPException:
-            # If header fails, try to get from cookie
-            token = request.cookies.get("access_token")
-            if token:
-                return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-            raise
-
-security = HTTPBearerOptional()
-
-
-def get_current_user_optional(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Optional authentication - returns user if authenticated, None otherwise"""
-    if credentials is None:
-        return None
-        
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            return None
-            
-        db = SessionLocal()
-        user = get_user_by_email(db, email)
-        db.close()
-        
-        return user
-    except JWTError:
-        return None
-    
-
-
-
-def get_current_user_required(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Required authentication - raises exception if not authenticated"""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    
-    if credentials is None:
-        raise credentials_exception
-        
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-            
-        db = SessionLocal()
-        user = get_user_by_email(db, email)
-        db.close()
-
-        if user is None:
-            raise credentials_exception
-        return user
-    except JWTError:
-        raise credentials_exception
-
-
-# Update the get_current_user function to handle both methods
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-        token_data = TokenData(email=email)
-    except JWTError:
-        raise credentials_exception
-
-    db = SessionLocal()
-    user = get_user_by_email(db, email=email)
-    db.close()
-
-    if user is None:
-        raise credentials_exception
-    return user
 
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    # Get token from query parameters
-    token = websocket.query_params.get("token")
+    await websocket.accept()
     
-    if not token:
-        logger.warning("WebSocket connection attempted without token")
-        await websocket.close(code=1008)
-        return
-
-    # Verify token
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
-        if email is None:
-            logger.warning("WebSocket token missing email")
-            await websocket.close(code=1008)
-            return
-            
-        # Verify user exists in database
-        db = SessionLocal()
-        user = get_user_by_email(db, email)
-        db.close()
-        
-        if not user:
-            logger.warning(f"WebSocket user not found: {email}")
-            await websocket.close(code=1008)
-            return
-            
-        logger.info(f"WebSocket authenticated for user: {email}")
-            
-    except jwt.ExpiredSignatureError:
-        logger.warning("WebSocket token expired")
-        try:
-            # Try to send error message before closing
-            await websocket.accept()
-            await websocket.send_json({
-                "type": "error",
-                "message": "Token expired. Please login again."
-            })
-            await websocket.close(code=1008)
-        except Exception as e:
-            # If sending fails, just close the connection
-            logger.warning(f"Could not send error message for expired token: {e}")
-            try:
-                await websocket.close(code=1008)
-            except:
-                pass
-        return
-        
-    except jwt.JWTError as e:
-        logger.warning(f"WebSocket token validation failed: {e}")
-        try:
-            await websocket.accept()
-            await websocket.send_json({
-                "type": "error", 
-                "message": "Invalid token. Please login again."
-            })
-            await websocket.close(code=1008)
-        except Exception as send_error:
-            logger.warning(f"Could not send error message for invalid token: {send_error}")
-            try:
-                await websocket.close(code=1008)
-            except:
-                pass
-        return
-        
-    except Exception as e:
-        logger.error(f"WebSocket authentication error: {e}")
-        try:
-            await websocket.close(code=1008)
-        except:
-            pass
-        return
-
-    # If we get here, authentication was successful
-    try:
-        await websocket.accept()
-    except Exception as e:
-        logger.error(f"Failed to accept WebSocket connection: {e}")
-        return
-
-    # Add to active connections
-    active_connections.append(websocket)
+    # Create or get session ID (could come from query params or create new)
+    session_id = websocket.query_params.get("session_id") or str(uuid.uuid4())
     
-    # Add to session manager with user-specific data
-    user_data = {"email": email, "conversation_history": []}
-    session_manager.add_connection(token, websocket, user_data)
-
-    # Send initial connection success message
-    try:
-        await websocket.send_json({
-            "type": "status", 
-            "message": "Connected successfully"
-        })
-    except Exception as e:
-        logger.error(f"Failed to send initial message: {e}")
-        if websocket in active_connections:
-            active_connections.remove(websocket)
-        return
-
-    # Load saved config for this user if available
-    try:
-        saved = config_manager.load_config()
-        if saved:
-            await websocket.send_json({"type": "saved_config", "config": saved})
-    except Exception as e:
-        logger.error(f"Failed to send saved config: {e}")
-
+    # Add to session manager
+    session_manager.add_connection(session_id, websocket, {
+        "connected_at": time.time(),
+        "ip_address": websocket.client.host if websocket.client else "unknown"
+    })
+    
+    logger.info(f"New WebSocket connection for session: {session_id}")
+    
     try:
         while True:
             data = await websocket.receive_json()
-            logger.info(f"WebSocket message received from {email}: {data['type']}")
-
-            # Process messages for this specific session
-            if data["type"] == "config":
-                try:
-                    config_data = data["config"]
-                    logger.info(f"Received config data from {email}, keys: {config_data.keys()}")
-                    
-                    # Validate required fields
-                    required_fields = ["system_prompt", "reference_audio_path", "reference_text", "model_path", "llm_path"]
-                    for field in required_fields:
-                        if field not in config_data:
-                            await websocket.send_json({
-                                "type": "error", 
-                                "message": f"Missing required field: {field}"
-                            })
-                            continue
-                    
-                    for key in ["reference_audio_path", "reference_audio_path2", "reference_audio_path3",
-                                "reference_text", "reference_text2", "reference_text3"]:
-                        if key in config_data:
-                            logger.info(f"Config includes {key}: {config_data[key]}")
-                        else:
-                            logger.warning(f"Config missing {key}")
-                    
-                    conf = CompanionConfig(**config_data)
-                    saved = config_manager.save_config(config_data)
-                    if saved:
-                        initialize_models(conf)
-                        await websocket.send_json({
-                            "type": "status", 
-                            "message": "Models initialized and configuration saved"
-                        })
-                    else:
-                        await websocket.send_json({
-                            "type": "error", 
-                            "message": "Failed to save configuration"
-                        })
-                except Exception as e:
-                    logger.error(f"Error processing config from {email}: {str(e)}")
-                    await websocket.send_json({
-                        "type": "error", 
-                        "message": f"Configuration error: {str(e)}"
-                    })
-
-            elif data["type"] == "request_saved_config":
-                saved = config_manager.load_config()
-                if saved:
-                    await websocket.send_json({"type": "saved_config", "config": saved})
-                else:
-                    await websocket.send_json({
-                        "type": "status", 
-                        "message": "No saved configuration found"
-                    })
-
-            elif data["type"] == "text_message":
-                user_text = data["text"]
-                session_id = data.get("session_id", "default")
-
-                logger.info(f"TEXT-MSG from {email}: {user_text!r}")
-                
-                if is_speaking:
-                    with user_input_lock:
-                        if len(pending_user_inputs) >= 3:
-                            pending_user_inputs = pending_user_inputs[-2:]
-                        pending_user_inputs.append((user_text, session_id))
-                    
-                    await websocket.send_json({
-                        "type": "status", 
-                        "message": "Queued – I'll answer in a moment"
-                    })
-                    continue
-                
-                await message_queue.put({"type": "transcription", "text": user_text})
-                threading.Thread(
-                    target=lambda: process_user_input(user_text, session_id),
-                    daemon=True
-                ).start()
-
-            elif data["type"] == "audio":
-                try:
-                    audio_data = np.asarray(data["audio"], dtype=np.float32)
-                    sample_rate = data["sample_rate"]
-                    
-                    if sample_rate != 16000:
-                        audio_tensor = torch.tensor(audio_data).unsqueeze(0)
-                        audio_tensor = torchaudio.functional.resample(
-                            audio_tensor, orig_freq=sample_rate, new_freq=16000
-                        )
-                        audio_data = audio_tensor.squeeze(0).numpy()
-                        sample_rate = 16000
-                    
-                    if config and config.vad_enabled and vad_processor:
-                        vad_processor.process_audio(audio_data)
-                    else:
-                        text = transcribe_audio(audio_data, sample_rate)
-                        await websocket.send_json({
-                            "type": "transcription", 
-                            "text": text
-                        })
-                        await message_queue.put({
-                            "type": "transcription", 
-                            "text": text
-                        })
-                        
-                        if is_speaking:
-                            with user_input_lock:
-                                pending_user_inputs.append((text, "default"))
-                        else:
-                            process_user_input(text)
-                except Exception as e:
-                    logger.error(f"Audio processing error for {email}: {e}")
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Failed to process audio"
-                    })
-
-            elif data["type"] == "interrupt":
-                logger.info(f"Explicit interrupt request from {email}")
-                success = handle_interrupt(websocket)
-                
-                await websocket.send_json({
-                    "type": "audio_status",
-                    "status": "interrupt_acknowledged",
-                    "success": success
-                })
-                
-                if success:
-                    await asyncio.sleep(0.3)
-                    with user_input_lock:
-                        if pending_user_inputs:
-                            user_text, session_id = pending_user_inputs.pop(0)
-                            pending_user_inputs.clear()
-                            threading.Thread(
-                                target=lambda: process_user_input(user_text, session_id),
-                                daemon=True
-                            ).start()
-
-            elif data["type"] == "mute":
-                muted = data.get("muted", False)
-                await websocket.send_json({
-                    "type": "mute_status", 
-                    "muted": muted
-                })
-                if not muted and config and config.vad_enabled and vad_processor:
-                    vad_processor.reset()
-
-            elif data["type"] == "ping":
-                # Handle keep-alive ping
-                await websocket.send_json({
-                    "type": "pong"
-                })
-
-            else:
-                logger.warning(f"Unknown message type from {email}: {data['type']}")
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"Unknown message type: {data['type']}"
-                })
-
+            # Process messages using session_id for context
+            session_data = session_manager.get_session_data(session_id)
+            # ... rest of your WebSocket handling
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for {email}")
-        if websocket in active_connections:
-            active_connections.remove(websocket)
-        session_manager.remove_connection(token, websocket)
-        
-    except Exception as e:
-        logger.error(f"WebSocket error for {email}: {e}")
-        if websocket in active_connections:
-            active_connections.remove(websocket)
-        session_manager.remove_connection(token, websocket)
-        try:
-            await websocket.close(code=1011)  # Internal error
-        except:
-            pass
+        logger.info(f"WebSocket disconnected for session: {session_id}")
+        session_manager.remove_connection(websocket)
 
 
 
@@ -1317,86 +943,12 @@ async def login_page(request: Request):
 async def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
 
-# Update your protected routes to handle authentication properly
+# Update your routes to remove authentication:
 @app.get("/chat", response_class=HTMLResponse)
-async def chat_page(request: Request, current_user: User = Depends(get_current_user_required)):
-    # This will automatically use the existing chat.html template
-    return templates.TemplateResponse("chat.html", {
-        "request": request, 
-        "user": current_user.email
-    })
+async def chat_page(request: Request):
+    return templates.TemplateResponse("chat.html", {"request": request})
 
 
-
-# Authentication routes
-@app.post("/token")
-async def login_for_access_token(response: Response, form_data: UserLogin):
-    db = SessionLocal()
-    user = authenticate_user(db, form_data.email, form_data.password)
-    db.close()
-
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Incorrect email or password"
-        )
-
-    # Create token with explicit expiration
-    expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email}, 
-        expires_delta=expires_delta
-    )
-    
-    # Debug logging
-    logger.info(f"Created new token for {user.email}, expires in {ACCESS_TOKEN_EXPIRE_MINUTES} minutes")
-    
-    # Decode and log token info for debugging
-    try:
-        payload = jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
-        exp_time = datetime.fromtimestamp(payload['exp'])
-        logger.info(f"Token expiration: {exp_time}")
-    except Exception as e:
-        logger.error(f"Error decoding new token: {e}")
-    
-    # Set cookie
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        max_age=30 * 60,
-        secure=False,
-        samesite="lax"
-    )
-    
-    return {"access_token": access_token, "token_type": "bearer"}
-
-
-@app.get("/api/token-status")
-async def token_status(request: Request):
-    """Debug endpoint to check token status"""
-    token = request.cookies.get("access_token")
-    
-    if not token:
-        return {"status": "no_token", "message": "No token found"}
-    
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        exp_time = datetime.fromtimestamp(payload['exp'])
-        now = datetime.now()
-        is_expired = exp_time < now
-        
-        return {
-            "status": "expired" if is_expired else "valid",
-            "email": payload.get("sub"),
-            "expires_at": exp_time.isoformat(),
-            "is_expired": is_expired,
-            "time_until_expiry": str(exp_time - now) if not is_expired else "EXPIRED"
-        }
-    except jwt.ExpiredSignatureError:
-        return {"status": "expired", "message": "Token has expired"}
-    except jwt.JWTError as e:
-        return {"status": "invalid", "message": f"Token invalid: {str(e)}"}
 
 
 
@@ -1404,12 +956,11 @@ async def token_status(request: Request):
 async def root():
     # Force clear any cookies and redirect to login
     response = RedirectResponse(url="/login")
-    response.delete_cookie("access_token")
     return response
 
 
 @app.post("/register")
-async def register_user(response: Response, user_data: UserCreate):
+async def register_user(user_data: UserCreate):
     db = SessionLocal()
 
     # Check if user already exists
@@ -1425,23 +976,14 @@ async def register_user(response: Response, user_data: UserCreate):
     user = create_user(db, user_data.email, user_data.password)
     db.close()
 
-    # Create a fresh token with proper expiration
-    access_token = create_access_token(data={"sub": user.email})
+    logger.info(f"Registration successful for {user.email}")
     
-    logger.info(f"Registration successful for {user.email}, token created")
-    
-    # Set the token as a cookie
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        max_age=30 * 60,  # 30 minutes
-        secure=False,
-        samesite="lax"
-    )
-    
-    return {"access_token": access_token, "token_type": "bearer"}
-
+    # Return success message without token
+    return {
+        "message": "Registration successful", 
+        "email": user.email,
+        "user_id": user.id
+    }
 
 
 
@@ -1498,520 +1040,7 @@ async def startup_event():
     
     logger.info("Application startup completed")
 
-def create_html_templates():
-    """Create HTML templates for the web interface"""
-    
-    # Update chat.html to handle authentication properly
-    with open("templates/chat.html", "w") as f:
-        f.write("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>AI Companion - Chat</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        #messages { height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; background: #fafafa; border-radius: 5px; }
-        .message { margin: 10px 0; padding: 10px; border-radius: 5px; }
-        .user { background-color: #e3f2fd; border-left: 4px solid #2196f3; }
-        .ai { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
-        .status { background-color: #fff3cd; border-left: 4px solid #ffc107; }
-        #input-form { display: flex; gap: 10px; margin-bottom: 15px; }
-        #message-input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; }
-        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
-        button:hover { background: #0056b3; }
-        button:disabled { background: #6c757d; cursor: not-allowed; }
-        #interrupt-btn { background: #dc3545; }
-        #interrupt-btn:hover { background: #c82333; }
-        #status { margin: 15px 0; padding: 10px; border-radius: 5px; font-weight: bold; }
-        .connected { background: #d4edda; color: #155724; }
-        .disconnected { background: #f8d7da; color: #721c24; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .logout-btn { background: #6c757d; padding: 8px 15px; font-size: 14px; }
-        .auth-error { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 5px; margin: 20px 0; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>AI Companion Chat</h1>
-            <button class="logout-btn" onclick="logout()">Logout</button>
-        </div>
-        
-        <div id="auth-status"></div>
-        <div id="status" class="disconnected">Disconnected</div>
-        <div id="messages"></div>
-        <form id="input-form">
-            <input type="text" id="message-input" placeholder="Type your message..." required>
-            <button type="submit" id="send-btn">Send</button>
-        </form>
-        <button id="interrupt-btn" disabled>Interrupt</button>
-    </div>
 
-    <script>
-        // Get token from multiple sources
-        function getToken() {
-            // Try localStorage first
-            let token = localStorage.getItem('access_token');
-            if (token) return token;
-            
-            // Try to extract token from URL query parameters
-            const urlParams = new URLSearchParams(window.location.search);
-            token = urlParams.get('token');
-            if (token) {
-                localStorage.setItem('access_token', token);
-                return token;
-            }
-            
-            // For cookies, we rely on the browser automatically sending them
-            return null;
-        }
-
-        let ws = null;
-        const token = getToken();
-        
-        function showAuthError(message) {
-            const authStatus = document.getElementById('auth-status');
-            authStatus.innerHTML = `<div class="auth-error">
-                <strong>Authentication Error:</strong> ${message}
-                <div style="margin-top: 10px;">
-                    <button onclick="window.location.href='/login'">Go to Login</button>
-                </div>
-            </div>`;
-            
-            // Disable inputs
-            document.getElementById('input-form').style.display = 'none';
-            document.getElementById('interrupt-btn').style.display = 'none';
-        }
-
-        if (!token) {
-            showAuthError('No authentication token found. Please login again.');
-        }
-
-        function connectWebSocket() {
-            if (!token) {
-                showAuthError('Cannot connect: No authentication token');
-                return;
-            }
-
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`;
-            
-            ws = new WebSocket(wsUrl);
-            
-            ws.onopen = () => {
-                document.getElementById('status').textContent = 'Connected';
-                document.getElementById('status').className = 'status connected';
-                document.getElementById('interrupt-btn').disabled = false;
-                document.getElementById('auth-status').innerHTML = '';
-                addMessage('system', 'Connected to AI Companion');
-            };
-
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    handleWebSocketMessage(data);
-                } catch (error) {
-                    console.error('Error parsing message:', error);
-                }
-            };
-
-            ws.onclose = (event) => {
-                document.getElementById('status').textContent = 'Disconnected';
-                document.getElementById('status').className = 'status disconnected';
-                document.getElementById('interrupt-btn').disabled = true;
-                addMessage('system', 'Disconnected from server');
-                
-                if (event.code === 1008) { // Policy violation - authentication error
-                    showAuthError('Authentication failed. Please login again.');
-                } else {
-                    // Attempt to reconnect after 3 seconds
-                    setTimeout(connectWebSocket, 3000);
-                }
-            };
-
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                document.getElementById('status').textContent = 'Connection error';
-            };
-        }
-
-        function handleWebSocketMessage(data) {
-            const messagesDiv = document.getElementById('messages');
-            
-            switch(data.type) {
-                case 'transcription':
-                    addMessage('user', data.text);
-                    break;
-                case 'response':
-                    addMessage('ai', data.text);
-                    break;
-                case 'status':
-                    addMessage('status', data.message);
-                    break;
-                case 'error':
-                    if (data.message.includes('auth') || data.message.includes('token')) {
-                        showAuthError(data.message);
-                    } else {
-                        addMessage('status', `Error: ${data.message}`);
-                    }
-                    break;
-                case 'audio_status':
-                    if (data.status === 'generating') {
-                        addMessage('status', 'AI is generating response...');
-                    } else if (data.status === 'interrupted') {
-                        addMessage('status', 'Response interrupted');
-                    }
-                    break;
-                default:
-                    console.log('Unknown message type:', data.type);
-            }
-        }
-
-        function addMessage(type, text) {
-            const messagesDiv = document.getElementById('messages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${type}`;
-            
-            let prefix = '';
-            switch(type) {
-                case 'user': prefix = '<strong>You:</strong> '; break;
-                case 'ai': prefix = '<strong>AI:</strong> '; break;
-                case 'status': prefix = '<em>System:</em> '; break;
-            }
-            
-            messageDiv.innerHTML = prefix + text;
-            messagesDiv.appendChild(messageDiv);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-
-        function logout() {
-            localStorage.removeItem('access_token');
-            // Clear cookie by setting expired date
-            document.cookie = "access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-            if (ws) {
-                ws.close();
-            }
-            window.location.href = '/login';
-        }
-
-        // Initialize connection when page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            if (token) {
-                connectWebSocket();
-            }
-            
-            document.getElementById('input-form').addEventListener('submit', (e) => {
-                e.preventDefault();
-                const input = document.getElementById('message-input');
-                const message = input.value.trim();
-
-                if (message && ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: 'text_message',
-                        text: message,
-                        session_id: 'default'
-                    }));
-                    input.value = '';
-                }
-            });
-
-            document.getElementById('interrupt-btn').addEventListener('click', () => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'interrupt' }));
-                }
-            });
-        });
-    </script>
-</body>
-</html>
-        """)
-
-# In the create_html_templates function, update register.html:
-with open("templates/register.html", "w") as f:
-    f.write("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Register</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; }
-        input[type="email"], input[type="password"] { 
-            width: 100%; 
-            padding: 10px; 
-            box-sizing: border-box; 
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        button { 
-            background: #007bff; 
-            color: white; 
-            padding: 12px 20px; 
-            border: none; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            width: 100%;
-            font-size: 16px;
-        }
-        button:hover { background: #0056b3; }
-        button:disabled { background: #6c757d; cursor: not-allowed; }
-        .login-link { margin-top: 20px; text-align: center; }
-        #message { margin-top: 15px; padding: 10px; border-radius: 5px; }
-        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-    </style>
-</head>
-<body>
-    <h2 style="text-align: center;">Register</h2>
-    <form id="registerForm">
-        <div class="form-group">
-            <label for="email">Email:</label>
-            <input type="email" id="email" required>
-        </div>
-        <div class="form-group">
-            <label for="password">Password:</label>
-            <input type="password" id="password" required minlength="6">
-        </div>
-        <button type="submit" id="submit-btn">Register</button>
-    </form>
-    <div class="login-link">
-        <p>Already have an account? <a href="/login">Login here</a></p>
-    </div>
-    <div id="message"></div>
-
-    <script>
-        document.getElementById('registerForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const submitBtn = document.getElementById('submit-btn');
-            const messageDiv = document.getElementById('message');
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-
-            // Clear previous messages
-            messageDiv.innerHTML = '';
-            messageDiv.className = '';
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Registering...';
-
-            try {
-                const response = await fetch('/register', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ email, password })
-                });
-
-                const result = await response.json();
-
-                if (response.ok) {
-                    messageDiv.textContent = 'Registration successful! Redirecting...';
-                    messageDiv.className = 'success';
-                    
-                    // Store token and redirect
-                    localStorage.setItem('access_token', result.access_token);
-                    setTimeout(() => {
-                        window.location.href = '/chat';
-                    }, 1000);
-                } else {
-                    messageDiv.textContent = result.detail || 'Registration failed';
-                    messageDiv.className = 'error';
-                }
-            } catch (error) {
-                messageDiv.textContent = 'Registration failed: Network error';
-                messageDiv.className = 'error';
-                console.error('Registration error:', error);
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Register';
-            }
-        });
-    </script>
-</body>
-</html>
-    """)
-
-
-
-
-def create_html_templates():
-    """Create HTML templates for the web interface"""
-    # Create chat page with proper token handling
-    with open("templates/chat.html", "w") as f:
-        f.write("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>AI Companion - Chat</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        #messages { height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; background: #fafafa; border-radius: 5px; }
-        .message { margin: 10px 0; padding: 10px; border-radius: 5px; }
-        .user { background-color: #e3f2fd; border-left: 4px solid #2196f3; }
-        .ai { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
-        .status { background-color: #fff3cd; border-left: 4px solid #ffc107; }
-        #input-form { display: flex; gap: 10px; margin-bottom: 15px; }
-        #message-input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; }
-        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
-        button:hover { background: #0056b3; }
-        button:disabled { background: #6c757d; cursor: not-allowed; }
-        #interrupt-btn { background: #dc3545; }
-        #interrupt-btn:hover { background: #c82333; }
-        #status { margin: 15px 0; padding: 10px; border-radius: 5px; font-weight: bold; }
-        .connected { background: #d4edda; color: #155724; }
-        .disconnected { background: #f8d7da; color: #721c24; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .logout-btn { background: #6c757d; padding: 8px 15px; font-size: 14px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>AI Companion Chat</h1>
-            <button class="logout-btn" onclick="logout()">Logout</button>
-        </div>
-        <div id="status" class="disconnected">Disconnected</div>
-        <div id="messages"></div>
-        <form id="input-form">
-            <input type="text" id="message-input" placeholder="Type your message..." required>
-            <button type="submit" id="send-btn">Send</button>
-        </form>
-        <button id="interrupt-btn" disabled>Interrupt</button>
-    </div>
-
-    <script>
-        let ws = null;
-        const token = localStorage.getItem('access_token');
-        
-        if (!token) {
-            window.location.href = '/login';
-        }
-
-        function connectWebSocket() {
-            ws = new WebSocket(`ws://${window.location.host}/ws?token=${token}`);
-            
-            ws.onopen = () => {
-                document.getElementById('status').textContent = 'Connected';
-                document.getElementById('status').className = 'status connected';
-                document.getElementById('interrupt-btn').disabled = false;
-                addMessage('system', 'Connected to AI Companion');
-            };
-
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    handleWebSocketMessage(data);
-                } catch (error) {
-                    console.error('Error parsing message:', error);
-                }
-            };
-
-            ws.onclose = () => {
-                document.getElementById('status').textContent = 'Disconnected';
-                document.getElementById('status').className = 'status disconnected';
-                document.getElementById('interrupt-btn').disabled = true;
-                addMessage('system', 'Disconnected from server');
-                
-                // Attempt to reconnect after 3 seconds
-                setTimeout(connectWebSocket, 3000);
-            };
-
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                document.getElementById('status').textContent = 'Connection error';
-            };
-        }
-
-        function handleWebSocketMessage(data) {
-            const messagesDiv = document.getElementById('messages');
-            
-            switch(data.type) {
-                case 'transcription':
-                    addMessage('user', data.text);
-                    break;
-                case 'response':
-                    addMessage('ai', data.text);
-                    break;
-                case 'status':
-                    addMessage('status', data.message);
-                    break;
-                case 'error':
-                    addMessage('status', `Error: ${data.message}`);
-                    break;
-                case 'audio_status':
-                    if (data.status === 'generating') {
-                        addMessage('status', 'AI is generating response...');
-                    } else if (data.status === 'interrupted') {
-                        addMessage('status', 'Response interrupted');
-                    }
-                    break;
-                default:
-                    console.log('Unknown message type:', data.type);
-            }
-        }
-
-        function addMessage(type, text) {
-            const messagesDiv = document.getElementById('messages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${type}`;
-            
-            let prefix = '';
-            switch(type) {
-                case 'user': prefix = '<strong>You:</strong> '; break;
-                case 'ai': prefix = '<strong>AI:</strong> '; break;
-                case 'status': prefix = '<em>System:</em> '; break;
-            }
-            
-            messageDiv.innerHTML = prefix + text;
-            messagesDiv.appendChild(messageDiv);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-
-        function logout() {
-            localStorage.removeItem('access_token');
-            if (ws) {
-                ws.close();
-            }
-            window.location.href = '/login';
-        }
-
-        // Initialize connection when page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            connectWebSocket();
-            
-            document.getElementById('input-form').addEventListener('submit', (e) => {
-                e.preventDefault();
-                const input = document.getElementById('message-input');
-                const message = input.value.trim();
-
-                if (message && ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: 'text_message',
-                        text: message,
-                        session_id: 'default'
-                    }));
-                    input.value = '';
-                }
-            });
-
-            document.getElementById('interrupt-btn').addEventListener('click', () => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'interrupt' }));
-                }
-            });
-        });
-    </script>
-</body>
-</html>
-        """)
-
-
-    # Redirect root to login
-    with open("templates/index.html", "w") as f:
-        f.write("""<meta http-equiv="refresh" content="0; url=/login" />""")
 
 async def process_message_queue():
     while True:
@@ -2027,11 +1056,9 @@ async def process_message_queue():
         message_queue.task_done()
 
 @app.get("/setup", response_class=HTMLResponse)
-async def setup_page(request: Request, current_user: User = Depends(get_current_user_required)):
-    return templates.TemplateResponse("setup.html", {
-        "request": request, 
-        "user": current_user.email
-    })
+async def setup_page(request: Request):
+    return templates.TemplateResponse("setup.html", {"request": request})
+
 
 
 @app.get("/debug/user")
@@ -2043,15 +1070,6 @@ async def debug_user(current_user: User = Depends(get_current_user)):
         "authenticated": True
     }
 
-@app.get("/debug/token")
-async def debug_token(token: str = Depends(security)):
-    """Debug endpoint to verify token"""
-    try:
-        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        return {"valid": True, "email": payload.get("sub")}
-    except JWTError as e:
-        return {"valid": False, "error": str(e)}
-
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -2062,18 +1080,13 @@ async def shutdown_event():
 @app.post("/logout")
 async def logout(response: Response):
     # Clear the cookie
-    response.delete_cookie("access_token")
     return {"message": "Logged out successfully"}
 
-@app.get("/api/debug/token")
-async def debug_token(current_user: User = Depends(get_current_user_required)):
-    return {"status": "valid", "email": current_user.email}
 
 @app.get("/logout")
 async def logout_page(response: Response):
     # Clear the cookie and redirect to login
     response = RedirectResponse(url="/login")
-    response.delete_cookie("access_token")
     return response
     
 
