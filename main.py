@@ -1095,10 +1095,32 @@ async def shutdown_event():
     model_thread_running.clear()
 
 
-@app.post("/logout")
-async def logout(response: Response):
-    # Clear the cookie
-    return {"message": "Logged out successfully"}
+
+@app.post("/login")
+async def login_user(user_data: UserLogin):
+    db = SessionLocal()
+    
+    # Simple email-based login
+    user = authenticate_user(db, user_data.email, user_data.password)
+    if not user:
+        db.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid email or password"
+        )
+    
+    db.close()
+
+    logger.info(f"Login successful for {user.email}")
+    
+    # Return success without token
+    return {
+        "message": "Login successful", 
+        "email": user.email,
+        "user_id": user.id
+    }
+
+
 
 
 @app.get("/logout")
