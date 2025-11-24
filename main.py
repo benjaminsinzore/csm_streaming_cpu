@@ -18,7 +18,7 @@ import whisper
 import bcrypt
 
 import uuid # Ensure this import is present at the top if not already there
-
+from fastapi import Depends, Request
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -93,7 +93,7 @@ Base = declarative_base()
 engine = create_engine("sqlite:///companion.db")
 SessionLocal = sessionmaker(bind=engine)
 
-# Database Models - Define these after Base is initialized
+# Update your User model
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
@@ -109,9 +109,13 @@ class UserSession(Base):
     expires_at = Column(String)
     created_at = Column(String, default=lambda: datetime.now().isoformat())
 
+
+
+# Update your Conversation model to include user_id
 class Conversation(Base):
     __tablename__ = "conversations"
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)  # Add this line - links to users.id
     session_id = Column(String, index=True)
     timestamp = Column(String)
     user_message = Column(Text)
@@ -175,6 +179,63 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 config_manager = ConfigManager()
 
+
+
+# Session management functions
+def create_session_token():
+    return str(uuid.uuid4())
+
+
+
+def create_user_session(db, user_id: int):
+    session_token = create_session_token()
+    expires_at = (datetime.now() + timedelta(days=7)).isoformat()  # 7-day session
+    
+    session = UserSession(
+        user_id=user_id,
+        session_token=session_token,
+        expires_at=expires_at
+    )
+    db.add(session)
+    db.commit()
+    return session_token
+
+
+def get_user_from_session(db, session_token: str):
+    if not session_token:
+        return None
+    
+    # Clean up expired sessions first
+    db.query(UserSession).filter(
+        UserSession.expires_at <= datetime.now().isoformat()
+    ).delete()
+    db.commit()
+    
+    session = db.query(UserSession).filter(
+        UserSession.session_token == session_token,
+        UserSession.expires_at > datetime.now().isoformat()
+    ).first()
+    
+    if session:
+        user = db.query(User).filter(User.id == session.user_id).first()
+        return user
+    return None
+
+
+
+def get_current_user(request: Request):
+    db = SessionLocal()
+    
+    # Get session token from cookie
+    session_token = request.cookies.get("session_token")
+    
+    if not session_token:
+        db.close()
+        return None
+    
+    user = get_user_from_session(db, session_token)
+    db.close()
+    return user
 
 
 
@@ -970,23 +1031,52 @@ def handle_interrupt(websocket):
 
 
 
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     session_id = websocket.query_params.get("session_id") or str(uuid.uuid4())
     
+    # Get user from session
+    user_id = None
+    user_email = "anonymous"
+    try:
+        # Try to get session token from query params or cookies
+        session_token = websocket.query_params.get("session_token")
+        if not session_token and "cookie" in websocket.headers:
+            cookies = websocket.headers["cookie"]
+            for cookie in cookies.split(";"):
+                if "session_token" in cookie:
+                    session_token = cookie.split("=")[1].strip()
+                    break
+        
+        if session_token:
+            db = SessionLocal()
+            user = get_user_from_session(db, session_token)
+            if user:
+                user_id = user.id
+                user_email = user.email
+                logger.info(f"Authenticated user: {user_email} (ID: {user_id})")
+            db.close()
+    except Exception as e:
+        logger.error(f"Error getting user from session: {e}")
+    
     session_manager.add_connection(session_id, websocket, {
         "connected_at": time.time(),
-        "ip_address": getattr(websocket.client, 'host', 'unknown')
+        "ip_address": getattr(websocket.client, 'host', 'unknown'),
+        "user_id": user_id,
+        "user_email": user_email
     })
-    logger.info(f"New WebSocket connection for session: {session_id}")
+    logger.info(f"New WebSocket connection for session: {session_id}, user: {user_email} (ID: {user_id})")
 
     try:
         # Send immediate welcome message
         await websocket.send_json({
             "type": "test_response",
-            "message": "WebSocket connected successfully!",
+            "message": f"WebSocket connected successfully! User: {user_email}",
             "session_id": session_id,
+            "user_id": user_id,
             "timestamp": datetime.now().isoformat()
         })
         logger.info(f"Sent welcome message to session: {session_id}")
@@ -997,61 +1087,148 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            logger.info(f"Received WebSocket message from session {session_id}: {data.get('type')}")
+            logger.info(f"Received WebSocket message from session {session_id}, user {user_email}: {data.get('type')}")
             
             message_type = data.get("type")
             
             if message_type == "text_message":
                 user_text = data.get("text", "").strip()
                 if user_text:
-                    logger.info(f"Processing text input from session {session_id}: '{user_text}'")
+                    logger.info(f"Processing text input from user {user_email}: '{user_text}'")
                     
                     # Send immediate acknowledgment
                     await websocket.send_json({
                         "type": "status",
                         "message": "Processing your message...",
-                        "session_id": session_id
+                        "session_id": session_id,
+                        "user_id": user_id
                     })
                     
-                    # Process in thread but send responses directly to this WebSocket
+                    # Process in thread with user context
                     threading.Thread(
                         target=process_user_input_direct,
-                        args=(user_text, session_id, websocket),
+                        args=(user_text, session_id, websocket, user_id),
                         daemon=True
                     ).start()
                 else:
-                    logger.warning(f"Received empty text input from session {session_id}")
+                    logger.warning(f"Received empty text input from user {user_email}")
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Empty message received",
+                        "session_id": session_id
+                    })
                     
             elif message_type == "interrupt":
-                logger.info(f"Interrupt request received from session {session_id}")
-                handle_interrupt(websocket)
+                logger.info(f"Interrupt request received from user {user_email}")
+                try:
+                    success = handle_interrupt(websocket)
+                    if success:
+                        await websocket.send_json({
+                            "type": "audio_status",
+                            "status": "interrupt_acknowledged",
+                            "session_id": session_id,
+                            "user_id": user_id
+                        })
+                except Exception as e:
+                    logger.error(f"Error handling interrupt for user {user_email}: {e}")
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Failed to process interrupt",
+                        "session_id": session_id
+                    })
                 
             elif message_type == "test":
                 test_message = data.get("message", "No message")
-                logger.info(f"Test message received from session {session_id}: {test_message}")
+                logger.info(f"Test message received from user {user_email}: {test_message}")
                 await websocket.send_json({
                     "type": "test_response", 
-                    "message": f"Test successful - Backend received: {test_message}",
+                    "message": f"Test successful - Backend received: {test_message} (User: {user_email})",
+                    "session_id": session_id,
+                    "user_id": user_id
+                })
+                
+            elif message_type == "request_conversation_history":
+                logger.info(f"Conversation history request from user {user_email}")
+                if user_id:
+                    try:
+                        db = SessionLocal()
+                        conversations = db.query(Conversation).filter(
+                            Conversation.user_id == user_id
+                        ).order_by(Conversation.timestamp.desc()).limit(50).all()
+                        db.close()
+                        
+                        await websocket.send_json({
+                            "type": "conversation_history",
+                            "conversations": [{
+                                "id": conv.id,
+                                "timestamp": conv.timestamp,
+                                "user_message": conv.user_message,
+                                "ai_message": conv.ai_message,
+                                "audio_path": conv.audio_path
+                            } for conv in conversations],
+                            "session_id": session_id,
+                            "user_id": user_id
+                        })
+                    except Exception as e:
+                        logger.error(f"Error fetching conversation history for user {user_email}: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Failed to fetch conversation history",
+                            "session_id": session_id
+                        })
+                else:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Authentication required to access conversation history",
+                        "session_id": session_id
+                    })
+                
+            else:
+                logger.warning(f"Unknown message type from user {user_email}: {message_type}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Unknown message type: {message_type}",
                     "session_id": session_id
                 })
                 
-            else:
-                logger.warning(f"Unknown message type from session {session_id}: {message_type}")
-                
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for session: {session_id}")
+        logger.info(f"WebSocket disconnected for session: {session_id}, user: {user_email}")
+        session_manager.remove_connection(websocket)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error for session {session_id}, user {user_email}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Invalid JSON data received",
+                "session_id": session_id
+            })
+        except:
+            pass
         session_manager.remove_connection(websocket)
     except Exception as e:
-        logger.error(f"Error in WebSocket connection for session {session_id}: {e}")
+        logger.error(f"Error in WebSocket connection for session {session_id}, user {user_email}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Server error occurred",
+                "session_id": session_id
+            })
+        except:
+            pass
         session_manager.remove_connection(websocket)
 
 
-def process_user_input_direct(user_text: str, session_id: str, websocket: WebSocket):
+
+
+
+
+
+def process_user_input_direct(user_text: str, session_id: str, websocket: WebSocket, user_id: int = None):
     """
-    Process user input and send responses directly to the WebSocket
+    Process user input and send responses directly to the WebSocket with user context
     """
     try:
-        logger.info(f"process_user_input_direct called with: '{user_text}', session: {session_id}")
+        logger.info(f"process_user_input_direct called with: '{user_text}', session: {session_id}, user_id: {user_id}")
         
         # Get conversation context
         context = "\n".join([f"User: {msg['user']}\nAI: {msg['ai']}" for msg in conversation_history[-5:]])
@@ -1073,10 +1250,11 @@ def process_user_input_direct(user_text: str, session_id: str, websocket: WebSoc
             "ai": ai_response
         })
         
-        # Save to database
+        # Save to database WITH USER ID
         try:
             db = SessionLocal()
             conv = Conversation(
+                user_id=user_id,  # This can be None for anonymous users
                 session_id=session_id,
                 timestamp=timestamp,
                 user_message=user_text,
@@ -1087,13 +1265,24 @@ def process_user_input_direct(user_text: str, session_id: str, websocket: WebSoc
             db.commit()
             
             index = speaker_counters[0]
-            output_file = f"audio/ai/{session_id}_response_{index}.wav"
+            # Include user_id in filename for better organization
+            if user_id:
+                output_file = f"audio/ai/user_{user_id}/{session_id}_response_{index}.wav"
+                os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            else:
+                output_file = f"audio/ai/{session_id}_response_{index}.wav"
+                
             speaker_counters[0] += 1
             
             conv.audio_path = output_file
             db.commit()
             db.close()
-            logger.info(f"Conversation saved to database, audio path: {output_file}")
+            
+            if user_id:
+                logger.info(f"Conversation saved to database for user {user_id}, audio path: {output_file}")
+            else:
+                logger.info(f"Conversation saved to database (anonymous user), audio path: {output_file}")
+                
         except Exception as e:
             logger.error(f"Database error: {e}")
             
@@ -1102,7 +1291,8 @@ def process_user_input_direct(user_text: str, session_id: str, websocket: WebSoc
             websocket.send_json({
                 "type": "response",
                 "text": ai_response,
-                "session_id": session_id
+                "session_id": session_id,
+                "user_id": user_id
             }),
             loop
         )
@@ -1112,7 +1302,7 @@ def process_user_input_direct(user_text: str, session_id: str, websocket: WebSoc
         # Start audio generation
         threading.Thread(
             target=audio_generation_thread_direct,
-            args=(ai_response, output_file, session_id, websocket),
+            args=(ai_response, output_file, session_id, websocket, user_id),
             daemon=True
         ).start()
         
@@ -1122,21 +1312,31 @@ def process_user_input_direct(user_text: str, session_id: str, websocket: WebSoc
             websocket.send_json({
                 "type": "error",
                 "message": f"Failed to generate response: {str(e)}",
-                "session_id": session_id
+                "session_id": session_id,
+                "user_id": user_id
             }),
             loop
         )
 
 
-def audio_generation_thread_direct(text, output_file, session_id, websocket):
+
+
+
+
+
+
+
+
+
+def audio_generation_thread_direct(text, output_file, session_id, websocket, user_id=None):
     """
-    Generate audio and send chunks directly to WebSocket
+    Generate audio and send chunks directly to WebSocket with user context
     """
     global current_generation_id
     current_generation_id += 1
     this_id = current_generation_id
     
-    logger.info(f"Starting audio generation for ID: {this_id}, session: {session_id}")
+    logger.info(f"Starting audio generation for ID: {this_id}, session: {session_id}, user_id: {user_id}")
     
     try:
         # Send generating status
@@ -1145,7 +1345,8 @@ def audio_generation_thread_direct(text, output_file, session_id, websocket):
                 "type": "audio_status",
                 "status": "generating",
                 "gen_id": this_id,
-                "session_id": session_id
+                "session_id": session_id,
+                "user_id": user_id
             }),
             loop
         )
@@ -1192,7 +1393,8 @@ def audio_generation_thread_direct(text, output_file, session_id, websocket):
                             "type": "audio_status",
                             "status": "first_chunk",
                             "gen_id": this_id,
-                            "session_id": session_id
+                            "session_id": session_id,
+                            "user_id": user_id
                         }),
                         loop
                     )
@@ -1209,7 +1411,8 @@ def audio_generation_thread_direct(text, output_file, session_id, websocket):
                         "sample_rate": generator.sample_rate,
                         "gen_id": this_id,
                         "chunk_num": chunk_counter,
-                        "session_id": session_id
+                        "session_id": session_id,
+                        "user_id": user_id
                     }),
                     loop
                 )
@@ -1226,12 +1429,13 @@ def audio_generation_thread_direct(text, output_file, session_id, websocket):
                 "type": "audio_status",
                 "status": "complete",
                 "gen_id": this_id,
-                "session_id": session_id
+                "session_id": session_id,
+                "user_id": user_id
             }),
             loop
         )
         
-        logger.info(f"Audio generation {this_id} completed successfully")
+        logger.info(f"Audio generation {this_id} completed successfully for user_id: {user_id}")
         
     except Exception as e:
         logger.error(f"Error in audio_generation_thread_direct: {e}")
@@ -1239,10 +1443,14 @@ def audio_generation_thread_direct(text, output_file, session_id, websocket):
             websocket.send_json({
                 "type": "error",
                 "message": f"Audio generation failed: {str(e)}",
-                "session_id": session_id
+                "session_id": session_id,
+                "user_id": user_id
             }),
             loop
         )
+
+
+
 
 
 
@@ -1270,10 +1478,10 @@ def process_user_input_wrapper(user_text: str, session_id: str, websocket: WebSo
 
 
 # Make sure your process_user_input function is updated to use the message_queue properly:
-def process_user_input(user_text, session_id="default"):
+def process_user_input(user_text, session_id="default", user_id=None):
     global config, is_speaking, pending_user_inputs, interrupt_flag
     
-    logger.info(f"process_user_input called with: '{user_text}', session: {session_id}")
+    logger.info(f"process_user_input called with: '{user_text}', session: {session_id}, user_id: {user_id}")
     
     if not user_text or user_text.strip() == "":
         logger.warning("Empty user input received, ignoring")
@@ -1287,7 +1495,7 @@ def process_user_input(user_text, session_id="default"):
     if is_speaking:
         logger.info(f"AI is currently speaking, adding input to pending queue: '{user_text}'")
         with user_input_lock:
-            pending_user_inputs = [(user_text, session_id)]
+            pending_user_inputs = [(user_text, session_id, user_id)]  # Include user_id in pending inputs
         if not interrupt_flag.is_set():
             logger.info("Automatically interrupting current speech for new input")
             interrupt_flag.set()
@@ -1335,10 +1543,11 @@ def process_user_input(user_text, session_id="default"):
             "ai": ai_response
         })
         
-        # Save to database
+        # Save to database WITH USER ID
         try:
             db = SessionLocal()
             conv = Conversation(
+                user_id=user_id,  # This can be None for anonymous users
                 session_id=session_id,
                 timestamp=timestamp,
                 user_message=user_text,
@@ -1349,13 +1558,24 @@ def process_user_input(user_text, session_id="default"):
             db.commit()
             
             index = speaker_counters[0]
-            output_file = f"audio/ai/{session_id}_response_{index}.wav"
+            # Include user_id in filename for better organization
+            if user_id:
+                output_file = f"audio/ai/user_{user_id}/{session_id}_response_{index}.wav"
+                os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            else:
+                output_file = f"audio/ai/{session_id}_response_{index}.wav"
+                
             speaker_counters[0] += 1
             
             conv.audio_path = output_file
             db.commit()
             db.close()
-            logger.info(f"Conversation saved to database, audio path: {output_file}")
+            
+            if user_id:
+                logger.info(f"Conversation saved to database for user {user_id}, audio path: {output_file}")
+            else:
+                logger.info(f"Conversation saved to database (anonymous user), audio path: {output_file}")
+                
         except Exception as e:
             logger.error(f"Database error: {e}")
             
@@ -1405,6 +1625,22 @@ def process_user_input(user_text, session_id="default"):
             loop
         )
 
+
+# Also update the process_pending_inputs function to handle user_id
+def process_pending_inputs():
+    global pending_user_inputs, is_speaking, interrupt_flag
+    time.sleep(0.2)
+    is_speaking = False
+    interrupt_flag.clear()
+    with user_input_lock:
+        if not pending_user_inputs:
+            logger.info("No pending user inputs to process")
+            return
+        latest_input = pending_user_inputs[-1]
+        logger.info(f"Processing only latest input: '{latest_input[0]}'")
+        pending_user_inputs = []
+        user_text, session_id, user_id = latest_input  # Unpack user_id
+        process_user_input(user_text, session_id, user_id)  # Pass user_id
 
 # Update audio_generation_thread to include session_id
 def audio_generation_thread(text, output_file, session_id="default"):
@@ -1589,6 +1825,31 @@ def audio_generation_thread(text, output_file, session_id="default"):
 
 
 
+def migrate_database():
+    """Add user_id column to conversations table if it doesn't exist"""
+    try:
+        # Check if user_id column exists
+        conn = sqlite3.connect("companion.db")
+        cursor = conn.cursor()
+        
+        # Check if the column exists
+        cursor.execute("PRAGMA table_info(conversations)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'user_id' not in columns:
+            print("Adding user_id column to conversations table...")
+            cursor.execute("ALTER TABLE conversations ADD COLUMN user_id INTEGER")
+            conn.commit()
+            print("Migration completed successfully")
+        else:
+            print("user_id column already exists")
+            
+        conn.close()
+    except Exception as e:
+        print(f"Migration error: {e}")
+
+
+
 
 @app.get("/api/debug/models")
 async def debug_models():
@@ -1621,6 +1882,40 @@ async def chat_page(request: Request):
 
 
 
+@app.get("/history", response_class=HTMLResponse)
+async def history_page(request: Request):
+    # Simple history page - you can enhance this later
+    current_user = await get_current_user(request)
+    if not current_user:
+        return RedirectResponse(url="/login")
+    
+    return templates.TemplateResponse("history.html", {
+        "request": request,
+        "user_email": current_user.email
+    })
+
+@app.get("/api/user/conversations")
+async def get_user_conversations(request: Request):
+    current_user = await get_current_user(request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    db = SessionLocal()
+    conversations = db.query(Conversation).filter(
+        Conversation.user_id == current_user.id
+    ).order_by(Conversation.timestamp.desc()).limit(50).all()
+    
+    db.close()
+    
+    return [{
+        "id": conv.id,
+        "timestamp": conv.timestamp,
+        "user_message": conv.user_message,
+        "ai_message": conv.ai_message,
+        "audio_path": conv.audio_path
+    } for conv in conversations]
+
+
 
 @app.get("/")
 async def root():
@@ -1629,8 +1924,11 @@ async def root():
     return response
 
 
+
+
+
 @app.post("/register")
-async def register_user(user_data: UserCreate):
+async def register_user(user_data: UserCreate, response: Response):
     db = SessionLocal()
 
     # Check if user already exists
@@ -1644,23 +1942,114 @@ async def register_user(user_data: UserCreate):
 
     # Create new user
     user = create_user(db, user_data.email, user_data.password)
+    
+    # Create session
+    session_token = create_user_session(db, user.id)
     db.close()
 
-    logger.info(f"Registration successful for {user.email}")
+    # Set session cookie
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        max_age=7*24*60*60,  # 7 days
+        samesite="lax"
+    )
     
-    # Return success message without token
     return {
         "message": "Registration successful", 
         "email": user.email,
         "user_id": user.id
     }
 
+@app.post("/login")
+async def login_user(user_data: UserLogin, response: Response):
+    db = SessionLocal()
+    
+    user = authenticate_user(db, user_data.email, user_data.password)
+    if not user:
+        db.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid email or password"
+        )
+    
+    # Create new session
+    session_token = create_user_session(db, user.id)
+    db.close()
+
+    # Set session cookie
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        max_age=7*24*60*60,  # 7 days
+        samesite="lax"
+    )
+    
+    return {
+        "message": "Login successful", 
+        "email": user.email,
+        "user_id": user.id
+    }
+
+@app.post("/logout")
+async def logout_user(response: Response):
+    # Clear the session cookie
+    response.delete_cookie("session_token")
+    return {"message": "Logout successful"}
+
+
+
+
+
+
+async def get_current_user(request: Request):
+    db = SessionLocal()
+    
+    # Get session token from cookie
+    session_token = request.cookies.get("session_token")
+    
+    if not session_token:
+        db.close()
+        return None
+    
+    user = get_user_from_session(db, session_token)
+    db.close()
+    return user
+
+# Protected endpoint example
+@app.get("/api/user/conversations_")
+async def get_user_conversations(current_user: User = Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    db = SessionLocal()
+    conversations = db.query(Conversation).filter(
+        Conversation.user_id == current_user.id
+    ).order_by(Conversation.timestamp.desc()).all()
+    
+    db.close()
+    
+    return [{
+        "id": conv.id,
+        "timestamp": conv.timestamp,
+        "user_message": conv.user_message,
+        "ai_message": conv.ai_message,
+        "audio_path": conv.audio_path
+    } for conv in conversations]
+
+
 
 
 @app.on_event("startup")
 async def startup_event():
+    migrate_database()  # Add this line
     """Initialize all models and resources before the application starts"""
     logger.info("Starting application initialization...")
+    
+    # Run database migrations
+    migrate_database()
     
     # Create tables if they don't exist
     Base.metadata.create_all(bind=engine)
