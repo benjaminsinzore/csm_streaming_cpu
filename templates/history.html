@@ -27,7 +27,7 @@
             <h2 class="text-2xl font-bold mb-4 text-indigo-400">User Profile</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <p class="text-gray-400">Email:</p>
+                    <p class="text-gray-400">Current User:</p>
                     <p class="text-white text-lg font-semibold">{{ user_email }}</p>
                 </div>
                 <div>
@@ -45,24 +45,45 @@
             </div>
         </div>
 
-        <div class="mb-6">
-            <h2 class="text-3xl font-bold mb-2">Your Conversation History</h2>
-            <p class="text-gray-400">All your conversations are saved and accessible here.</p>
+        <!-- User Selection Section -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-6">
+            <h2 class="text-2xl font-bold mb-4 text-indigo-400">Select User</h2>
+            <div class="flex flex-col md:flex-row md:items-end space-y-4 md:space-y-0 md:space-x-4">
+                <div class="flex-1">
+                    <label for="userSelect" class="block text-gray-400 mb-2">Choose a user to view their history:</label>
+                    <select id="userSelect" class="w-full bg-gray-700 text-white p-3 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="">Select a user...</option>
+                        {% for user in all_users %}
+                        <option value="{{ user.id }}" {% if user.id == user_id %}selected{% endif %}>
+                            {{ user.email }} (ID: {{ user.id }})
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <button onclick="loadSelectedUserHistory()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded transition duration-200 w-full md:w-auto">
+                        Load History
+                    </button>
+                </div>
+                <div>
+                    <button onclick="loadCurrentUserHistory()" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded transition duration-200 w-full md:w-auto">
+                        My History
+                    </button>
+                </div>
+            </div>
         </div>
 
-        <div class="mb-6 flex space-x-4">
-            <button onclick="loadConversations()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
-                </svg>
-                Refresh History
-            </button>
-            <button onclick="clearHistory()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
-                </svg>
-                Clear All History
-            </button>
+        <!-- Selected User Info -->
+        <div id="selectedUserInfo" class="bg-indigo-900 rounded-lg p-4 mb-6 hidden">
+            <div class="flex justify-between items-center">
+                <div>
+                    <p class="text-indigo-200">Viewing history for:</p>
+                    <p class="text-white text-lg font-semibold" id="selectedUserName">Loading...</p>
+                </div>
+                <button onclick="clearSelectedUser()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm">
+                    Clear Selection
+                </button>
+            </div>
         </div>
 
         <!-- Stats Section -->
@@ -73,6 +94,10 @@
                     <p class="text-white text-xl font-bold" id="totalConversations">0</p>
                 </div>
                 <div>
+                    <p class="text-gray-400">Selected User:</p>
+                    <p class="text-white text-sm" id="statsUserEmail">{{ user_email }}</p>
+                </div>
+                <div>
                     <p class="text-gray-400">Last Updated:</p>
                     <p class="text-white text-sm" id="lastUpdated">Just now</p>
                 </div>
@@ -81,7 +106,7 @@
 
         <div id="loading" class="text-center text-gray-400 py-8">
             <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-400 mx-auto mb-4"></div>
-            <p>Loading your conversations...</p>
+            <p>Loading conversations...</p>
         </div>
 
         <div id="conversationsList" class="space-y-4 hidden">
@@ -93,11 +118,8 @@
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto text-gray-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                 </svg>
-                <p class="text-xl mb-2">No conversations yet</p>
-                <p class="mb-4">Start chatting to see your history here!</p>
-                <a href="/chat" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg inline-block transition duration-200">
-                    Start Chatting
-                </a>
+                <p class="text-xl mb-2">No conversations found</p>
+                <p class="mb-4">This user hasn't had any conversations yet.</p>
             </div>
         </div>
 
@@ -108,7 +130,7 @@
                 </svg>
                 <p class="text-xl mb-2">Error loading conversations</p>
                 <p id="errorMessage" class="mb-4"></p>
-                <button onclick="loadConversations()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg transition duration-200">
+                <button onclick="loadCurrentUserHistory()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg transition duration-200">
                     Try Again
                 </button>
             </div>
@@ -116,6 +138,9 @@
     </main>
 
     <script>
+        let currentSelectedUserId = {{ user_id }};
+        let currentSelectedUserEmail = "{{ user_email }}";
+
         // Format the account creation date
         function formatAccountDate() {
             const accountDateElement = document.getElementById('accountDate');
@@ -125,12 +150,14 @@
             }
         }
 
-        async function loadConversations() {
+        // Load conversations for a specific user
+        async function loadConversations(userId = null, userEmail = null) {
             const loading = document.getElementById('loading');
             const conversationsList = document.getElementById('conversationsList');
             const emptyState = document.getElementById('emptyState');
             const errorState = document.getElementById('errorState');
             const statsSection = document.getElementById('statsSection');
+            const selectedUserInfo = document.getElementById('selectedUserInfo');
 
             loading.classList.remove('hidden');
             conversationsList.classList.add('hidden');
@@ -138,8 +165,14 @@
             errorState.classList.add('hidden');
             statsSection.classList.add('hidden');
 
+            // If no user specified, use current user
+            if (!userId) {
+                userId = {{ user_id }};
+                userEmail = "{{ user_email }}";
+            }
+
             try {
-                const response = await fetch('/api/user/conversations');
+                const response = await fetch(`/api/user/conversations?user_id=${userId}`);
                 
                 if (!response.ok) {
                     if (response.status === 401) {
@@ -156,6 +189,7 @@
                 // Update stats
                 const totalConversations = document.getElementById('totalConversations');
                 const lastUpdated = document.getElementById('lastUpdated');
+                const statsUserEmail = document.getElementById('statsUserEmail');
                 
                 if (totalConversations) {
                     totalConversations.textContent = conversations.length;
@@ -163,7 +197,18 @@
                 if (lastUpdated) {
                     lastUpdated.textContent = new Date().toLocaleTimeString();
                 }
+                if (statsUserEmail) {
+                    statsUserEmail.textContent = userEmail;
+                }
                 statsSection.classList.remove('hidden');
+
+                // Show selected user info if viewing someone else's history
+                if (userId != {{ user_id }}) {
+                    document.getElementById('selectedUserName').textContent = userEmail;
+                    selectedUserInfo.classList.remove('hidden');
+                } else {
+                    selectedUserInfo.classList.add('hidden');
+                }
 
                 if (conversations.length === 0) {
                     emptyState.classList.remove('hidden');
@@ -191,7 +236,7 @@
                                     </svg>
                                 </div>
                                 <div class="flex-1">
-                                    <div class="text-blue-400 font-semibold mb-1">You ({{ user_email }}):</div>
+                                    <div class="text-blue-400 font-semibold mb-1">User:</div>
                                     <div class="text-white bg-gray-700 p-3 rounded">${escapeHtml(conv.user_message)}</div>
                                 </div>
                             </div>
@@ -221,26 +266,33 @@
             }
         }
 
-        async function clearHistory() {
-            if (!confirm('Are you sure you want to clear your entire conversation history? This action cannot be undone.')) {
+        // Load history for selected user from dropdown
+        function loadSelectedUserHistory() {
+            const userSelect = document.getElementById('userSelect');
+            const selectedUserId = userSelect.value;
+            const selectedUserEmail = userSelect.options[userSelect.selectedIndex].text.split(' (ID:')[0];
+            
+            if (!selectedUserId) {
+                alert('Please select a user first');
                 return;
             }
 
-            try {
-                const response = await fetch('/api/user/conversations', {
-                    method: 'DELETE'
-                });
+            currentSelectedUserId = selectedUserId;
+            currentSelectedUserEmail = selectedUserEmail;
+            loadConversations(selectedUserId, selectedUserEmail);
+        }
 
-                if (response.ok) {
-                    alert('History cleared successfully');
-                    loadConversations();
-                } else {
-                    throw new Error('Failed to clear history');
-                }
-            } catch (error) {
-                console.error('Error clearing history:', error);
-                alert('Error clearing history: ' + error.message);
-            }
+        // Load current user's history
+        function loadCurrentUserHistory() {
+            currentSelectedUserId = {{ user_id }};
+            currentSelectedUserEmail = "{{ user_email }}";
+            document.getElementById('userSelect').value = {{ user_id }};
+            loadConversations({{ user_id }}, "{{ user_email }}");
+        }
+
+        // Clear selected user and show current user's history
+        function clearSelectedUser() {
+            loadCurrentUserHistory();
         }
 
         async function logout() {
@@ -259,10 +311,10 @@
             return div.innerHTML;
         }
 
-        // Load data when page loads
+        // Load current user's history when page loads
         document.addEventListener('DOMContentLoaded', function() {
             formatAccountDate();
-            loadConversations();
+            loadCurrentUserHistory();
         });
     </script>
 </body>

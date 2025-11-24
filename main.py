@@ -1898,23 +1898,47 @@ async def history_page(request: Request):
     if not current_user:
         return RedirectResponse(url="/login")
     
+    # Get all users for the dropdown (admin feature)
+    db = SessionLocal()
+    try:
+        all_users = db.query(User).order_by(User.email).all()
+        users_list = [{"id": user.id, "email": user.email} for user in all_users]
+        
+        # Check if current user is admin (you can implement your own admin logic)
+        is_admin = True  # Change this to your admin check logic
+        if not is_admin:
+            # Non-admins can only see their own data
+            users_list = [user for user in users_list if user["id"] == current_user["id"]]
+            
+    except Exception as e:
+        logger.error(f"Error fetching users: {e}")
+        users_list = []
+    finally:
+        db.close()
+    
     return templates.TemplateResponse("history.html", {
         "request": request,
-        "user_email": current_user.email,
-        "user_id": current_user.id,
-        "created_at": current_user.created_at
+        "user_email": current_user["email"],
+        "user_id": current_user["id"],
+        "created_at": current_user["created_at"],
+        "all_users": users_list,
+        "is_admin": is_admin  # Pass to template if needed
     })
 
+
 @app.get("/api/user/conversations")
-async def get_user_conversations(request: Request):
+async def get_user_conversations(request: Request, user_id: int = None):
     current_user = await get_current_user(request)
     if not current_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
+    # If no user_id provided, use current user's ID
+    target_user_id = user_id if user_id else current_user["id"]
+    
     db = SessionLocal()
     try:
         conversations = db.query(Conversation).filter(
-            Conversation.user_id == current_user.id
+            Conversation.user_id == target_user_id
         ).order_by(Conversation.timestamp.desc()).limit(50).all()
         
         return [{
@@ -1929,7 +1953,6 @@ async def get_user_conversations(request: Request):
         raise HTTPException(status_code=500, detail="Error fetching conversations")
     finally:
         db.close()
-
 
 
 
