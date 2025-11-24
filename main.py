@@ -223,19 +223,25 @@ def get_user_from_session(db, session_token: str):
 
 
 
-def get_current_user(request: Request):
-    db = SessionLocal()
-    
+async def get_current_user(request: Request):
     # Get session token from cookie
     session_token = request.cookies.get("session_token")
     
     if not session_token:
-        db.close()
         return None
     
-    user = get_user_from_session(db, session_token)
-    db.close()
-    return user
+    db = SessionLocal()
+    try:
+        user = get_user_from_session(db, session_token)
+        if user:
+            # Return the ORM object but extract values when needed
+            return user
+        return None
+    except Exception as e:
+        logger.error(f"Error getting current user: {e}")
+        return None
+    finally:
+        db.close()
 
 
 
@@ -1903,13 +1909,6 @@ async def history_page(request: Request):
     try:
         all_users = db.query(User).order_by(User.email).all()
         users_list = [{"id": user.id, "email": user.email} for user in all_users]
-        
-        # Check if current user is admin (you can implement your own admin logic)
-        is_admin = True  # Change this to your admin check logic
-        if not is_admin:
-            # Non-admins can only see their own data
-            users_list = [user for user in users_list if user["id"] == current_user["id"]]
-            
     except Exception as e:
         logger.error(f"Error fetching users: {e}")
         users_list = []
@@ -1918,13 +1917,11 @@ async def history_page(request: Request):
     
     return templates.TemplateResponse("history.html", {
         "request": request,
-        "user_email": current_user["email"],
-        "user_id": current_user["id"],
-        "created_at": current_user["created_at"],
-        "all_users": users_list,
-        "is_admin": is_admin  # Pass to template if needed
+        "user_email": current_user.email,  # Access as object attribute
+        "user_id": current_user.id,        # Access as object attribute
+        "created_at": current_user.created_at,  # Access as object attribute
+        "all_users": users_list
     })
-
 
 @app.get("/api/user/conversations")
 async def get_user_conversations(request: Request, user_id: int = None):
@@ -1933,7 +1930,7 @@ async def get_user_conversations(request: Request, user_id: int = None):
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     # If no user_id provided, use current user's ID
-    target_user_id = user_id if user_id else current_user["id"]
+    target_user_id = user_id if user_id else current_user.id  # Access as object attribute
     
     db = SessionLocal()
     try:
@@ -1955,7 +1952,6 @@ async def get_user_conversations(request: Request, user_id: int = None):
         db.close()
 
 
-
 @app.get("/api/user/profile")
 async def get_user_profile(request: Request):
     current_user = await get_current_user(request)
@@ -1963,10 +1959,10 @@ async def get_user_profile(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     return {
-        "email": current_user.email,
-        "user_id": current_user.id,
-        "created_at": current_user.created_at
-    }        
+        "email": current_user.email,      # Access as object attribute
+        "user_id": current_user.id,       # Access as object attribute
+        "created_at": current_user.created_at  # Access as object attribute
+    }      
 
 
 
@@ -1980,7 +1976,7 @@ async def delete_user_conversations(request: Request):
     try:
         # Delete user's conversations
         deleted_count = db.query(Conversation).filter(
-            Conversation.user_id == current_user.id
+            Conversation.user_id == current_user.id  # Access as object attribute
         ).delete()
         
         db.commit()
@@ -1995,7 +1991,6 @@ async def delete_user_conversations(request: Request):
         raise HTTPException(status_code=500, detail="Error deleting conversations")
     finally:
         db.close()
-
 
 
 @app.get("/")
