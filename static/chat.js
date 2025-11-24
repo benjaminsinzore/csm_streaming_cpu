@@ -141,7 +141,7 @@ function connectWebSocket() {
   }
 
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws = new WebSocket(`${proto}//${location.host}/ws?session_id=${SESSION_ID}`);
   window.ws = ws;
 
   const connLbl = document.getElementById('connectionStatus');
@@ -151,6 +151,7 @@ function connectWebSocket() {
   }
 
   ws.onopen = () => {
+    console.log("✅ WebSocket connected successfully");
     if (connLbl) {
       connLbl.textContent = 'Connected';
       connLbl.className = 'text-green-500';
@@ -158,13 +159,6 @@ function connectWebSocket() {
     
     reconnecting = false;
     reconnectAttempts = 0;
-    
-    // Send test message to verify connection
-    ws.send(JSON.stringify({
-      type: 'test', 
-      message: 'Connection established',
-      session_id: SESSION_ID
-    }));
     
     if (!reconnecting) {
       addMessageToConversation('ai', 'WebSocket connected. Ready for voice or text.');
@@ -174,16 +168,14 @@ function connectWebSocket() {
   };
 
   ws.onclose = (event) => {
-    console.log("WebSocket closed with code:", event.code);
+    console.log("❌ WebSocket closed with code:", event.code, "reason:", event.reason);
     if (connLbl) {
       connLbl.textContent = 'Disconnected';
       connLbl.className = 'text-red-500';
     }
 
-    // Clear audio state on disconnection
     clearAudioPlayback();
     
-    // Don't auto-reconnect if this was a normal closure
     if (event.code !== 1000 && event.code !== 1001) {
       reconnecting = true;
       reconnectAttempts++;
@@ -196,7 +188,7 @@ function connectWebSocket() {
   };
 
   ws.onerror = (error) => {
-    console.error("WebSocket error:", error);
+    console.error("❌ WebSocket error:", error);
     if (connLbl) {
       connLbl.textContent = 'Error';
       connLbl.className = 'text-red-500';
@@ -204,11 +196,13 @@ function connectWebSocket() {
   };
 
   ws.onmessage = (e) => {
+    console.log("📨 RAW WebSocket message received:", e.data);
     try {
       const data = JSON.parse(e.data);
+      console.log("📨 Parsed WebSocket message type:", data.type, "data:", data);
       handleWebSocketMessage(data);
     } catch (err) {
-      console.error("Error handling WebSocket message:", err);
+      console.error("❌ Error parsing WebSocket message:", err, "Raw data:", e.data);
     }
   };
 }
@@ -1067,3 +1061,39 @@ function debugConversationHistory() {
 
 // Make it available globally
 window.debugConversationHistory = debugConversationHistory;
+
+
+
+// Add this to test if messages are being received
+function testFullFlow() {
+  console.log("=== TESTING FULL FLOW ===");
+  
+  // Test 1: Check conversation pane
+  debugConversationHistory();
+  
+  // Test 2: Test WebSocket connection
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    console.log("✅ WebSocket is connected");
+    
+    // Send a test message
+    const testMsg = {
+      type: 'test',
+      message: 'Full flow test',
+      session_id: SESSION_ID,
+      timestamp: new Date().toISOString()
+    };
+    console.log("Sending test message:", testMsg);
+    ws.send(JSON.stringify(testMsg));
+    
+    // Send a real message after 2 seconds
+    setTimeout(() => {
+      console.log("Sending real text message...");
+      sendTextMessage("Test message from debug function");
+    }, 2000);
+    
+  } else {
+    console.error("❌ WebSocket not connected");
+  }
+}
+
+window.testFullFlow = testFullFlow;
