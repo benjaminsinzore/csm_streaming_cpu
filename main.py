@@ -260,8 +260,12 @@ def create_user(db, email: str, password: str):
     db.refresh(user)
     return user
 
+
 def get_user_by_email(db, email: str):
     return db.query(User).filter(User.email == email).first()
+
+
+
 
 def authenticate_user(db, email: str, password: str):
     user = get_user_by_email(db, email)
@@ -269,11 +273,16 @@ def authenticate_user(db, email: str, password: str):
         # To prevent timing attacks, we should still call verify_password even if user doesn't exist
         verify_password("dummy_password", "dummy_hash") # Simulate verification time
         return None
+    
     # Truncate the provided password before verifying
     truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
     if not verify_password(truncated_password, user.hashed_password):
         return None
+    
+    # Refresh the user to ensure it's attached to the session
+    db.refresh(user)
     return user
+
 
 
 
@@ -1979,68 +1988,87 @@ async def root():
 @app.post("/register")
 async def register_user(user_data: UserCreate, response: Response):
     db = SessionLocal()
+    
+    try:
+        # Check if user already exists
+        existing_user = get_user_by_email(db, user_data.email)
+        if existing_user:
+            raise HTTPException(
+                status_code=400,
+                detail="User with this email already exists"
+            )
 
-    # Check if user already exists
-    existing_user = get_user_by_email(db, user_data.email)
-    if existing_user:
-        db.close()
-        raise HTTPException(
-            status_code=400,
-            detail="User with this email already exists"
+        # Create new user
+        user = create_user(db, user_data.email, user_data.password)
+        
+        # Create session - this should work now since user is still attached
+        session_token = create_user_session(db, user.id)
+        
+        # Set session cookie
+        response.set_cookie(
+            key="session_token",
+            value=session_token,
+            httponly=True,
+            max_age=7*24*60*60,  # 7 days
+            samesite="lax"
         )
+        
+        return {
+            "message": "Registration successful", 
+            "email": user.email,  # This should work now
+            "user_id": user.id    # This should work now
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error during registration: {e}")
+        raise HTTPException(status_code=500, detail="Registration failed")
+    finally:
+        db.close()
 
-    # Create new user
-    user = create_user(db, user_data.email, user_data.password)
-    
-    # Create session
-    session_token = create_user_session(db, user.id)
-    db.close()
 
-    # Set session cookie
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        max_age=7*24*60*60,  # 7 days
-        samesite="lax"
-    )
-    
-    return {
-        "message": "Registration successful", 
-        "email": user.email,
-        "user_id": user.id
-    }
 
 @app.post("/login")
 async def login_user(user_data: UserLogin, response: Response):
     db = SessionLocal()
     
-    user = authenticate_user(db, user_data.email, user_data.password)
-    if not user:
-        db.close()
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid email or password"
+    try:
+        user = authenticate_user(db, user_data.email, user_data.password)
+        if not user:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid email or password"
+            )
+        
+        # Create new session
+        session_token = create_user_session(db, user.id)
+        
+        # Set session cookie
+        response.set_cookie(
+            key="session_token",
+            value=session_token,
+            httponly=True,
+            max_age=7*24*60*60,  # 7 days
+            samesite="lax"
         )
-    
-    # Create new session
-    session_token = create_user_session(db, user.id)
-    db.close()
+        
+        return {
+            "message": "Login successful", 
+            "email": user.email,  # This should work now
+            "user_id": user.id    # This should work now
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error during login: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
+    finally:
+        db.close()
 
-    # Set session cookie
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        max_age=7*24*60*60,  # 7 days
-        samesite="lax"
-    )
-    
-    return {
-        "message": "Login successful", 
-        "email": user.email,
-        "user_id": user.id
-    }
 
 @app.post("/logout")
 async def logout_user(response: Response):
@@ -2174,27 +2202,6 @@ async def shutdown_event():
 
 
 
-@app.post("/login")
-async def login_user(user_data: UserLogin):
-    db = SessionLocal()
-    
-    user = authenticate_user(db, user_data.email, user_data.password)
-    if not user:
-        db.close()
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid email or password"
-        )
-    
-    db.close()
-
-    logger.info(f"Login successful for {user.email}")
-    
-    return {
-        "message": "Login successful", 
-        "email": user.email,
-        "user_id": user.id
-    }
 
 
 @app.get("/api/status")
