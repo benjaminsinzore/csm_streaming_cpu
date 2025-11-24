@@ -76,7 +76,10 @@ function showNotification(msg, type='info'){
 
 function addMessageToConversation(sender,text){
   const pane=document.getElementById('conversationHistory');
-  if(!pane) return;
+  if(!pane) {
+    console.error("Conversation history pane not found!");
+    return;
+  }
   const box=document.createElement('div');
   box.className=`p-3 mb-3 rounded-lg text-sm ${
             sender==='user'?'bg-gray-800 ml-2':'bg-indigo-900 mr-2'}`;
@@ -97,6 +100,7 @@ function addMessageToConversation(sender,text){
             .replace(/\n/g,'<br>')}</div>`;
   pane.appendChild(box);
   pane.scrollTop=pane.scrollHeight;
+  console.log(`✅ Added ${sender} message to conversation`);
 }
 
 function connectWebSocket() {
@@ -133,7 +137,12 @@ function connectWebSocket() {
     reconnecting = false;
     reconnectAttempts = 0;
     
-    ws.send(JSON.stringify({type: 'request_saved_config'}));
+    // Send test message to verify connection
+    ws.send(JSON.stringify({
+      type: 'test', 
+      message: 'Connection established',
+      session_id: SESSION_ID
+    }));
     
     if (!reconnecting) {
       addMessageToConversation('ai', 'WebSocket connected. Ready for voice or text.');
@@ -182,69 +191,107 @@ function connectWebSocket() {
   };
 }
 
+// Add this function to test the WebSocket connection
+function testConnection() {
+  console.log("=== TESTING CONNECTION ===");
+  console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
+  console.log("Session ID:", SESSION_ID);
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    // Send a test message
+    const testMsg = {
+      type: 'test',
+      message: 'Connection test',
+      session_id: SESSION_ID,
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log("Sending test message:", testMsg);
+    ws.send(JSON.stringify(testMsg));
+    showNotification("Test message sent", "info");
+  } else {
+    console.error("WebSocket not connected");
+    showNotification("WebSocket not connected", "error");
+  }
+}
+
+// Add this function to test if WebSocket messages are being received
+function testMessageReception() {
+  console.log("=== TESTING MESSAGE RECEPTION ===");
+  console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    // Send multiple test messages to see what comes back
+    const tests = [
+      {type: 'test', message: 'Test 1', session_id: SESSION_ID},
+      {type: 'test', message: 'Test 2', session_id: SESSION_ID}
+    ];
+    
+    tests.forEach((test, index) => {
+      setTimeout(() => {
+        console.log(`Sending test message ${index + 1}:`, test);
+        ws.send(JSON.stringify(test));
+      }, index * 1000);
+    });
+    
+    showNotification("Sent test messages - check console", "info");
+  } else {
+    console.error("WebSocket not connected");
+    showNotification("WebSocket not connected", "error");
+  }
+}
+
+// Make functions available globally
+window.testConnection = testConnection;
+window.testMessageReception = testMessageReception;
+
 function sendTextMessage(txt) {
-  if (!txt.trim()) return;
+  if (!txt.trim()) {
+    console.log("Empty message, ignoring");
+    return;
+  }
   
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     showNotification("Not connected", "error");
     return;
   }
+
+  console.log("=== SENDING TEXT MESSAGE ===");
+  console.log("Message:", txt);
+  console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
+
+  // Create the message payload
+  const messageData = {
+    type: 'text_message',
+    text: txt,
+    session_id: SESSION_ID,
+    timestamp: new Date().toISOString()
+  };
   
-  console.log("Force clearing all audio state before sending text message");
+  console.log("Sending message data:", messageData);
   
-  // Stop any playing audio
-  if (isAudioCurrentlyPlaying) {
-    if (currentAudioSource) {
-      try {
-        if (currentAudioSource.disconnect) currentAudioSource.disconnect();
-        if (currentAudioSource.stop) currentAudioSource.stop(0);
-      } catch (e) {
-        console.warn("Error stopping audio:", e);
-      }
-      currentAudioSource = null;
-    }
-    isAudioCurrentlyPlaying = false;
+  try {
+    // Add user message to UI immediately
+    addMessageToConversation('user', txt);
+    
+    // Update message count
+    const cnt = document.getElementById('messageCount');
+    if (cnt) cnt.textContent = ++messageCount;
+    
+    // Clear input
+    document.getElementById('textInput').value = '';
+    
+    // Show thinking indicator
+    showVoiceCircle();
+    
+    // Send message to server
+    ws.send(JSON.stringify(messageData));
+    
+    console.log("✅ Text message sent successfully");
+  } catch (error) {
+    console.error("❌ Error sending message:", error);
+    showNotification("Error sending message", "error");
   }
-  
-  // Clear all flags and queues
-  interruptRequested = false;
-  interruptInProgress = false;
-  activeGenId = 0;
-  audioPlaybackQueue = [];
-  
-  // Always force interruption to be absolutely sure
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    try {
-      ws.send(JSON.stringify({type: 'interrupt', immediate: true}));
-    } catch (e) {
-      console.warn("Error sending interrupt:", e);
-    }
-  }
-  
-  // Wait a bit before sending the actual message
-  setTimeout(() => {
-    try {
-      // Show visual feedback
-      showVoiceCircle();
-      
-      // Send the message
-      ws.send(JSON.stringify({
-        type: 'text_message',
-        text: txt,
-        session_id: SESSION_ID
-      }));
-      
-      const cnt = document.getElementById('messageCount');
-      if (cnt) cnt.textContent = ++messageCount;
-      
-      document.getElementById('textInput').value = '';
-      
-      console.log("Text message sent successfully");
-    } catch (error) {
-      console.error("Error sending message:", error);
-      showNotification("Error sending message", "error");
-    }
-  }, 300);
 }
 
 // Reset all audio state to ensure clean state for new interactions
@@ -339,7 +386,6 @@ function clearAudioPlayback() {
   }, 300);
 }
 
-
 // Handle interruption request from user
 function requestInterrupt() {
   console.log("User requested interruption");
@@ -401,215 +447,133 @@ function requestInterrupt() {
 }
 
 function handleWebSocketMessage(d) {
-  console.log("Received message:", d.type, d);
+  console.log("📨 Received message:", d.type, d);
   
   switch(d.type) {
     case 'transcription':
+      console.log("🎤 Transcription:", d.text);
       addMessageToConversation('user', d.text);
       showVoiceCircle();
       break;
       
     case 'response':
+      console.log("🤖 AI Response:", d.text);
+      // ADD THE AI MESSAGE TO CONVERSATION IMMEDIATELY
       addMessageToConversation('ai', d.text);
       showVoiceCircle();
-      
-      console.log("NEW RESPONSE RECEIVED - FORCE RESETTING ALL AUDIO STATE");
-      
-      if (isAudioCurrentlyPlaying) {
-        if (currentAudioSource) {
-          try {
-            if (currentAudioSource.disconnect) currentAudioSource.disconnect();
-            if (currentAudioSource.stop) currentAudioSource.stop(0);
-          } catch (e) {
-            console.warn("Error stopping current audio:", e);
-          }
-          currentAudioSource = null;
-        }
-        isAudioCurrentlyPlaying = false;
-      }
-      
-      interruptRequested = false;
-      interruptInProgress = false;
-      
-      activeGenId = 0;
-      
-      audioPlaybackQueue = [];
-      
-      try {
-        if (audioContext) {
-          if (audioContext.state === 'suspended') {
-            audioContext.resume().catch(e => console.warn("Error resuming audio context:", e));
-          }
-        } else {
-          audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          window.audioContext = audioContext;
-        }
-      } catch (e) {
-        console.warn("Error with audio context:", e);
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        window.audioContext = audioContext;
-      }
-      
-      console.log("Audio state fully reset and ready for new audio");
       break;
       
     case 'audio_chunk':
-      console.log("Audio chunk received, flags:", 
-                 "interruptRequested:", interruptRequested, 
-                 "interruptInProgress:", interruptInProgress,
-                 "genId:", d.gen_id,
-                 "activeGenId:", activeGenId);
+      console.log("🔊 Audio chunk received - genId:", d.gen_id, "activeGenId:", activeGenId);
       
-      if (!isAudioCurrentlyPlaying && activeGenId === 0) {
-        console.log("FIRST AUDIO CHUNK - FORCING FLAGS RESET");
-        interruptRequested = false;
-        interruptInProgress = false;
+      // Set active generation ID if this is the first chunk
+      if (activeGenId === 0 && d.gen_id) {
+        activeGenId = d.gen_id;
+        console.log("🎯 Setting active generation ID to:", activeGenId);
       }
       
-      // Don't queue new audio if an interrupt was requested
-      if (interruptRequested || interruptInProgress) {
-        console.log("Interrupt active - ignoring new audio chunk");
-        return;
-      }
-      
-      // Set active generation ID on first chunk
-      if (activeGenId === 0) {
-        activeGenId = d.gen_id || 1;
-        console.log("!!! Setting activeGenId to:", activeGenId);
-      }
-      
-      // Only accept chunks that match our active generation
-      if ((d.gen_id === activeGenId) || (activeGenId === 0)) {
+      // Only process if generation ID matches or we don't have an active one yet
+      if (activeGenId === 0 || d.gen_id === activeGenId) {
         queueAudioForPlayback(d.audio, d.sample_rate, d.gen_id || 0);
         showVoiceCircle();
       } else {
-        console.log(`Ignored stale chunk - current gen: ${activeGenId}, received: ${d.gen_id}`);
+        console.log("🚫 Ignoring audio chunk - generation ID mismatch");
       }
       break;
       
     case 'audio_status':
-      console.log("Audio status update:", d.status);
+      console.log("🔊 Audio status:", d.status, "genId:", d.gen_id);
       
       if (d.status === 'generating') {
-        console.log("GOT GENERATING STATUS - IMMEDIATELY CLEARING ALL INTERRUPT FLAGS");
+        console.log("🔄 New audio generation starting");
+        // Reset interrupt flags for new generation
         interruptRequested = false;
         interruptInProgress = false;
         
-        // Capture the generation ID for new generations
         if (d.gen_id) {
-          console.log(`New generation starting with ID: ${d.gen_id}`);
           activeGenId = d.gen_id;
+          console.log("🎯 Active generation set to:", activeGenId);
         }
         
         showVoiceCircle();
       } 
+      else if (d.status === 'first_chunk') {
+        console.log("🎵 First audio chunk ready");
+        showVoiceCircle();
+      }
       else if (d.status === 'complete') {
-        console.log("Audio generation complete");
-        if (!d.gen_id || d.gen_id === activeGenId) {
-          activeGenId = 0; // Reset for next generation
-        }
+        console.log("✅ Audio generation complete");
+        // Reset for next generation
+        activeGenId = 0;
         if (!isAudioCurrentlyPlaying) {
           hideVoiceCircle();
         }
       } 
       else if (d.status === 'interrupted' || d.status === 'interrupt_acknowledged') {
-        console.log("Server confirmed interrupt - clearing audio");
+        console.log("⏹️ Audio interrupted by server");
         clearAudioPlayback();
-        
-        setTimeout(() => {
-          console.log("Resetting interrupt flags after server confirmation");
-          interruptRequested = false;
-          interruptInProgress = false;
-        }, 300);
       }
       break;
       
     case 'status':
+      console.log("ℹ️ Status:", d.message);
       if (d.message === 'Thinking...') {
         showVoiceCircle();
-        
-        interruptRequested = false;
-        interruptInProgress = false;
-        activeGenId = 0;
       }
       break;
       
     case 'error':
+      console.error("❌ Error:", d.message);
       showNotification(d.message, 'error');
       hideVoiceCircle();
       break;
       
     case 'vad_status':
+      console.log("🎤 VAD Status:", d.status);
       if (d.status === 'speech_started') {
-        console.log(`[VAD] speech_started | should_interrupt=${d.should_interrupt}`);
-
-        if (d.should_interrupt && isAudioCurrentlyPlaying) {
-          console.log('[VAD] confirmed – sending interrupt');
-          requestInterrupt();
-        } else {
-          console.log('[VAD] ignored (echo / early AI audio)');
-        }
+        showVoiceCircle();
       }
       break;
+
+    // Add this case to handle test responses
+    case 'test_response':
+      console.log("✅ Test response received:", d.message);
+      showNotification(d.message, 'success');
+      break;
+      
+    default:
+      console.log("❓ Unknown message type:", d.type);
   }
 }
 
 function queueAudioForPlayback(arr, sr, genId = 0) {
-  if (activeGenId !== 0 && genId !== activeGenId) {
-    console.log(`Stale chunk ignored (genId mismatch): ${genId} vs ${activeGenId}`);
-    return;
-  }
+  console.log("🎵 Queueing audio chunk - genId:", genId, "queue length:", audioPlaybackQueue.length);
   
-  // Don't queue if interrupting
+  // Don't queue if we're interrupting
   if (interruptRequested || interruptInProgress) {
-    console.log("Interrupt active - skipping audio chunk");
+    console.log("🚫 Interrupt active - skipping audio chunk");
     return;
   }
   
-  console.log("Queueing audio chunk for playback");
-  audioPlaybackQueue.push({arr, sr, genId});
+  // Set active generation if this is the first chunk we see
+  if (activeGenId === 0 && genId !== 0) {
+    activeGenId = genId;
+    console.log("🎯 First chunk - setting activeGenId to:", activeGenId);
+  }
   
-  if (!isAudioCurrentlyPlaying) {
-    console.log("▶Starting audio playback");
-    processAudioPlaybackQueue();
+  // Only queue if generation matches
+  if (activeGenId === 0 || genId === activeGenId) {
+    audioPlaybackQueue.push({arr, sr, genId});
+    
+    // Start playback if not already playing
+    if (!isAudioCurrentlyPlaying) {
+      console.log("▶️ Starting audio playback from queue");
+      processAudioPlaybackQueue();
+    }
+  } else {
+    console.log("🚫 Generation mismatch - ignoring chunk");
   }
 }
-
-function queueAudioForPlayback(arr, sr, genId = 0) {
-  // Extra logging for the first audio chunk
-  if (!isAudioCurrentlyPlaying) {
-    console.log("Queueing first audio chunk", 
-               "interruptRequested:", interruptRequested, 
-               "interruptInProgress:", interruptInProgress);
-  }
-  
-  if (!isAudioCurrentlyPlaying && audioPlaybackQueue.length === 0) {
-    console.log("First audio chunk - forcing clear of interrupt flags");
-    interruptRequested = false;
-    interruptInProgress = false;
-  }
-  
-  // Don't queue audio from a different generation than our active one
-  if (activeGenId !== 0 && genId !== activeGenId) {
-    console.log(`Stale chunk ignored (genId mismatch): ${genId} vs ${activeGenId}`);
-    return;
-  }
-  
-  // Don't queue if interrupting - BUT CHECK AGAIN THAT FLAGS ARE VALID
-  if (interruptRequested || interruptInProgress) {
-    console.log("Interrupt active - skipping audio chunk");
-    return;
-  }
-  
-  console.log("Queueing audio chunk for playback");
-  audioPlaybackQueue.push({arr, sr, genId});
-  
-  if (!isAudioCurrentlyPlaying) {
-    console.log("STARTING AUDIO PLAYBACK - FIRST CHUNK");
-    processAudioPlaybackQueue();
-  }
-}
-
 
 // Modified to ensure first audio actually plays
 function processAudioPlaybackQueue() {
@@ -682,23 +646,27 @@ function processAudioPlaybackQueue() {
 }
 
 async function playAudioChunk(audioArr, sampleRate) {
-  // Skip playback if interrupt was requested
+  // Skip if interrupting
   if (interruptRequested || interruptInProgress) {
-    console.log("Interrupt active - not playing audio chunk");
+    console.log("🚫 Interrupt active - skipping playback");
     return Promise.resolve();
   }
   
   try {
-    // Ensure we have a valid audio context
+    // Ensure audio context exists and is running
     if (!audioContext) {
+      console.log("🎵 Creating new audio context");
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
       window.audioContext = audioContext;
     }
     
-    // Make sure context is resumed
+    // Resume context if suspended
     if (audioContext.state === 'suspended') {
+      console.log("🎵 Resuming suspended audio context");
       await audioContext.resume();
     }
+    
+    console.log("🎵 Playing audio chunk, length:", audioArr.length);
     
     const buf = audioContext.createBuffer(1, audioArr.length, sampleRate);
     buf.copyToChannel(new Float32Array(audioArr), 0);
@@ -706,23 +674,22 @@ async function playAudioChunk(audioArr, sampleRate) {
     const src = audioContext.createBufferSource();
     src.buffer = buf;
     
-    // Store reference to current source for potential interruption
+    // Store reference for potential interruption
     currentAudioSource = src;
     
     const an = audioContext.createAnalyser(); 
     an.fftSize = 256;
     src.connect(an); 
     an.connect(audioContext.destination); 
+    
+    console.log("🎵 Starting audio playback");
     src.start();
     
-    console.log("🎵 Started playing audio chunk");
-
+    // Visual feedback
     const arr = new Uint8Array(an.frequencyBinCount);
     const circle = document.getElementById('voice-circle');
     
-    // Animation function that respects interruption
     function pump() {
-      // Stop animation if source is no longer current or interrupt requested
       if (src !== currentAudioSource || interruptRequested || interruptInProgress) {
         return;
       }
@@ -734,7 +701,7 @@ async function playAudioChunk(audioArr, sampleRate) {
           circle.style.setProperty('--dynamic-scale', (1+avg/255*1.5).toFixed(3));
         }
       } catch (e) {
-        console.warn("Error in animation pump:", e);
+        console.warn("Animation error:", e);
         return;
       }
       
@@ -746,19 +713,43 @@ async function playAudioChunk(audioArr, sampleRate) {
     
     return new Promise(resolve => {
       src.onended = () => {
-        // Only resolve if this is still the current source and no interrupt
-        if (src === currentAudioSource && !interruptRequested && !interruptInProgress) {
-          resolve();
-        } else {
-          resolve(); // Still resolve to maintain chain
+        console.log("🎵 Audio chunk finished playing");
+        if (src === currentAudioSource) {
+          currentAudioSource = null;
         }
+        resolve();
       };
     });
+    
   } catch (error) {
-    console.error("Error playing audio chunk:", error);
-    return Promise.resolve(); // Resolve anyway to keep chain going
+    console.error("❌ Error playing audio chunk:", error);
+    return Promise.resolve();
   }
 }
+
+// Add this function to debug WebSocket communication
+function debugWebSocket() {
+  console.log("=== WEBSOCKET DEBUG ===");
+  console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
+  console.log("Active generation ID:", activeGenId);
+  console.log("Audio playing:", isAudioCurrentlyPlaying);
+  console.log("Queue length:", audioPlaybackQueue.length);
+  console.log("Interrupt flags:", {interruptRequested, interruptInProgress});
+  
+  // Test message to see if backend responds
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const testMsg = {
+      type: 'test',
+      message: 'Debug test',
+      session_id: SESSION_ID
+    };
+    console.log("Sending test message:", testMsg);
+    ws.send(JSON.stringify(testMsg));
+  }
+}
+
+// Make it available globally
+window.debugWebSocket = debugWebSocket;
 
 async function startRecording() {
   if (isRecording) return;

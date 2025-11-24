@@ -970,79 +970,527 @@ def handle_interrupt(websocket):
 
 
 
-
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     session_id = websocket.query_params.get("session_id") or str(uuid.uuid4())
     
+    # Add to session manager
     session_manager.add_connection(session_id, websocket, {
         "connected_at": time.time(),
         "ip_address": getattr(websocket.client, 'host', 'unknown')
     })
     logger.info(f"New WebSocket connection for session: {session_id}")
 
-    # TEST: Send immediate welcome message
     try:
+        # Send immediate welcome message to test connection
         await websocket.send_json({
             "type": "test_response",
             "message": "WebSocket connected successfully!",
+            "session_id": session_id,
+            "timestamp": datetime.now().isoformat()
+        })
+        logger.info(f"Sent welcome message to session: {session_id}")
+        
+        # Send initial status
+        await websocket.send_json({
+            "type": "status",
+            "message": "Ready to receive messages",
             "session_id": session_id
         })
+
     except Exception as e:
-        logger.error(f"Error sending welcome message: {e}")
+        logger.error(f"Error sending initial messages to session {session_id}: {e}")
 
     try:
         while True:
             # Receive and process messages from client
             data = await websocket.receive_json()
-            logger.info(f"Received WebSocket message type: {data.get('type')}")
+            logger.info(f"Received WebSocket message from session {session_id}: {data.get('type')}")
             
             message_type = data.get("type")
             
-            if message_type == "text_message":  # This matches your frontend
+            if message_type == "text_message":
                 user_text = data.get("text", "").strip()
                 if user_text:
-                    logger.info(f"Processing text input: '{user_text}'")
-                    # Process the text input
-                    threading.Thread(
-                        target=lambda: process_user_input(user_text, session_id), 
-                        daemon=True
-                    ).start()
+                    logger.info(f"Processing text input from session {session_id}: '{user_text}'")
+                    
+                    # Send immediate acknowledgment
+                    await websocket.send_json({
+                        "type": "status",
+                        "message": "Processing your message...",
+                        "session_id": session_id
+                    })
+                    
+                    # Process the text input in a separate thread
+                    try:
+                        threading.Thread(
+                            target=process_user_input_wrapper,
+                            args=(user_text, session_id, websocket),
+                            daemon=True
+                        ).start()
+                    except Exception as e:
+                        logger.error(f"Error starting processing thread for session {session_id}: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Failed to process message",
+                            "session_id": session_id
+                        })
                 else:
-                    logger.warning("Received empty text input")
+                    logger.warning(f"Received empty text input from session {session_id}")
+                    await websocket.send_json({
+                        "type": "error", 
+                        "message": "Empty message received",
+                        "session_id": session_id
+                    })
                     
             elif message_type == "interrupt":
-                logger.info("Interrupt request received from client")
-                handle_interrupt(websocket)
+                logger.info(f"Interrupt request received from session {session_id}")
+                try:
+                    # Handle interrupt synchronously to ensure immediate response
+                    success = handle_interrupt(websocket)
+                    if success:
+                        await websocket.send_json({
+                            "type": "audio_status",
+                            "status": "interrupt_acknowledged",
+                            "session_id": session_id
+                        })
+                except Exception as e:
+                    logger.error(f"Error handling interrupt for session {session_id}: {e}")
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Failed to process interrupt",
+                        "session_id": session_id
+                    })
                 
             elif message_type == "audio":
-                # Handle audio data if needed
-                logger.debug("Audio data received")
+                # Handle audio data for voice input
+                audio_data = data.get("audio")
+                sample_rate = data.get("sample_rate", 16000)
+                if audio_data and len(audio_data) > 0:
+                    logger.debug(f"Audio data received from session {session_id}, length: {len(audio_data)}")
+                    # Process audio data if VAD is enabled
+                    if vad_processor and config and config.vad_enabled:
+                        try:
+                            # Convert to numpy array and process
+                            audio_np = np.array(audio_data, dtype=np.float32)
+                            vad_processor.process_audio(audio_np)
+                        except Exception as e:
+                            logger.error(f"Error processing audio data for session {session_id}: {e}")
+                else:
+                    logger.warning(f"Empty or invalid audio data from session {session_id}")
                 
             elif message_type == "request_saved_config":
-                logger.info("Client requested saved config")
-                # Send current config back to client if needed
+                logger.info(f"Config request from session {session_id}")
+                try:
+                    # Send current configuration back to client
+                    saved_config = config_manager.load_config()
+                    if saved_config:
+                        await websocket.send_json({
+                            "type": "config",
+                            "config": saved_config,
+                            "session_id": session_id
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "status",
+                            "message": "No saved configuration found",
+                            "session_id": session_id
+                        })
+                except Exception as e:
+                    logger.error(f"Error sending config to session {session_id}: {e}")
 
             elif message_type == "test":
-                logger.info(f"Test message received: {data.get('message')}")
-                # Send a response back to confirm
+                test_message = data.get("message", "No message")
+                logger.info(f"Test message received from session {session_id}: {test_message}")
+                # Send immediate test response
                 await websocket.send_json({
                     "type": "test_response", 
-                    "message": "Test successful - backend is receiving messages",
-                    "session_id": session_id
+                    "message": f"Test successful - Backend received: {test_message}",
+                    "session_id": session_id,
+                    "original_message": test_message,
+                    "timestamp": datetime.now().isoformat()
                 })
                 
             else:
-                logger.warning(f"Unknown message type: {message_type}")
+                logger.warning(f"Unknown message type from session {session_id}: {message_type}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Unknown message type: {message_type}",
+                    "session_id": session_id
+                })
                 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session: {session_id}")
+        # Clean up session
         session_manager.remove_connection(websocket)
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error for session {session_id}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Invalid JSON data received",
+                "session_id": session_id
+            })
+        except:
+            pass
+        session_manager.remove_connection(websocket)
+        
     except Exception as e:
-        logger.error(f"Error in WebSocket connection: {e}")
+        logger.error(f"Unexpected error in WebSocket connection for session {session_id}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Server error occurred",
+                "session_id": session_id
+            })
+        except:
+            pass
         session_manager.remove_connection(websocket)
+
+
+def process_user_input_wrapper(user_text: str, session_id: str, websocket: WebSocket):
+    """
+    Wrapper function to process user input with proper error handling
+    """
+    try:
+        process_user_input(user_text, session_id)
+    except Exception as e:
+        logger.error(f"Error in process_user_input for session {session_id}: {e}")
+        # Try to send error back to client
+        try:
+            asyncio.run_coroutine_threadsafe(
+                websocket.send_json({
+                    "type": "error",
+                    "message": f"Failed to generate response: {str(e)}",
+                    "session_id": session_id
+                }),
+                loop
+            )
+        except Exception as send_error:
+            logger.error(f"Failed to send error message to session {session_id}: {send_error}")
+
+
+# Make sure your process_user_input function is updated to use the message_queue properly:
+def process_user_input(user_text, session_id="default"):
+    global config, is_speaking, pending_user_inputs, interrupt_flag
+    
+    logger.info(f"process_user_input called with: '{user_text}', session: {session_id}")
+    
+    if not user_text or user_text.strip() == "":
+        logger.warning("Empty user input received, ignoring")
+        return
+        
+    logger.info(f"Current state - is_speaking: {is_speaking}, pending_inputs: {len(pending_user_inputs)}")
+    
+    interrupt_flag.clear()
+    is_speaking = False
+    
+    if is_speaking:
+        logger.info(f"AI is currently speaking, adding input to pending queue: '{user_text}'")
+        with user_input_lock:
+            pending_user_inputs = [(user_text, session_id)]
+        if not interrupt_flag.is_set():
+            logger.info("Automatically interrupting current speech for new input")
+            interrupt_flag.set()
+            asyncio.run_coroutine_threadsafe(
+                message_queue.put({"type": "audio_status", "status": "interrupted"}),
+                loop
+            )
+            time.sleep(0.3)
+            process_pending_inputs()
+        return
+        
+    interrupt_flag.clear()
+    logger.info(f"Processing user input: '{user_text}'")
+    
+    # Get conversation context
+    context = "\n".join([f"User: {msg['user']}\nAI: {msg['ai']}" for msg in conversation_history[-5:]])
+    rag_context = rag.query(user_text) if rag else ""
+    
+    system_prompt = config.system_prompt if config else "You are a helpful AI assistant."
+    if rag_context:
+        system_prompt += f"\n\nRelevant context:\n{rag_context}"
+        
+    logger.info(f"System prompt prepared, context length: {len(context)}")
+    
+    # Send thinking status
+    asyncio.run_coroutine_threadsafe(
+        message_queue.put({
+            "type": "status", 
+            "message": "Thinking...",
+            "session_id": session_id
+        }),
+        loop
+    )
+    
+    try:
+        logger.info("Generating AI response...")
+        with llm_lock:
+            ai_response = llm.generate_response(system_prompt, user_text, context)
+        logger.info(f"AI response generated: '{ai_response[:100]}...'")
+        
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        conversation_history.append({
+            "timestamp": timestamp,
+            "user": user_text,
+            "ai": ai_response
+        })
+        
+        # Save to database
+        try:
+            db = SessionLocal()
+            conv = Conversation(
+                session_id=session_id,
+                timestamp=timestamp,
+                user_message=user_text,
+                ai_message=ai_response,
+                audio_path=""
+            )
+            db.add(conv)
+            db.commit()
+            
+            index = speaker_counters[0]
+            output_file = f"audio/ai/{session_id}_response_{index}.wav"
+            speaker_counters[0] += 1
+            
+            conv.audio_path = output_file
+            db.commit()
+            db.close()
+            logger.info(f"Conversation saved to database, audio path: {output_file}")
+        except Exception as e:
+            logger.error(f"Database error: {e}")
+            
+        # Add to RAG system
+        if rag:
+            threading.Thread(target=lambda: rag.add_conversation(user_text, ai_response), daemon=True).start()
+            
+        # Send response to client via message_queue
+        asyncio.run_coroutine_threadsafe(
+            message_queue.put({
+                "type": "response", 
+                "text": ai_response,
+                "session_id": session_id
+            }),
+            loop
+        )
+        
+        logger.info("Response sent to message queue, starting audio generation...")
+        
+        time.sleep(0.5)
+        
+        if is_speaking:
+            logger.warning("Still speaking when trying to start new audio - forcing interrupt")
+            interrupt_flag.set()
+            is_speaking = False
+            time.sleep(0.5)
+            
+        interrupt_flag.clear()
+        is_speaking = False
+        
+        # Start audio generation
+        threading.Thread(
+            target=lambda: audio_generation_thread(ai_response, output_file, session_id), 
+            daemon=True
+        ).start()
+        
+    except Exception as e:
+        logger.error(f"Error generating response: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        asyncio.run_coroutine_threadsafe(
+            message_queue.put({
+                "type": "error", 
+                "message": "Failed to generate response",
+                "session_id": session_id
+            }),
+            loop
+        )
+
+
+# Update audio_generation_thread to include session_id
+def audio_generation_thread(text, output_file, session_id="default"):
+    global is_speaking, interrupt_flag, audio_queue, model_thread_running, current_generation_id, speaking_start_time, generator
+    current_generation_id += 1
+    this_id = current_generation_id
+    interrupt_flag.clear()
+    logger.info(f"Starting audio generation for ID: {this_id}, session: {session_id}")
+    
+    if not audio_gen_lock.acquire(blocking=False):
+        logger.warning(f"Audio generation {this_id} - lock acquisition failed, another generation is in progress")
+        asyncio.run_coroutine_threadsafe(
+            message_queue.put({
+                "type": "error",
+                "message": "Audio generation busy, skipping synthesis",
+                "gen_id": this_id,
+                "session_id": session_id
+            }),
+            loop
+        )
+        return
+    
+    try:
+        start_model_thread()
+        interrupt_flag.clear()
+        is_speaking = True
+        speaking_start_time = time.time()
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        all_audio_chunks = []
+        text_lower = text.lower()
+        text_lower = preprocess_text_for_tts(text_lower)
+        
+        asyncio.run_coroutine_threadsafe(
+            message_queue.put({
+                "type": "audio_status",
+                "status": "preparing_generation",
+                "gen_id": this_id,
+                "session_id": session_id
+            }),
+            loop
+        )
+        
+        time.sleep(0.2)
+        logger.info(f"Sending generating status with ID {this_id}")
+        asyncio.run_coroutine_threadsafe(
+            message_queue.put({
+                "type": "audio_status",
+                "status": "generating",
+                "gen_id": this_id,
+                "session_id": session_id
+            }),
+            loop
+        )
+        
+        time.sleep(0.2)
+        words = text.split()
+        avg_wpm = 100
+        words_per_second = avg_wpm / 60
+        estimated_seconds = len(words) / words_per_second
+        max_audio_length_ms = int(estimated_seconds * 1000)
+        
+        model_queue.put((
+            text_lower,
+            config.voice_speaker_id,
+            reference_segments,
+            max_audio_length_ms,
+            0.8,
+            50
+        ))
+        
+        generation_start = time.time()
+        chunk_counter = 0
+        
+        while True:
+            try:
+                if interrupt_flag.is_set():
+                    logger.info(f"Audio generation {this_id} - interrupt detected, stopping")
+                    model_thread_running.clear()
+                    time.sleep(0.1)
+                    model_thread_running.set()
+                    start_model_thread()
+                    while not model_result_queue.empty():
+                        try:
+                            model_result_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                    break
+                
+                result = model_result_queue.get(timeout=0.1)
+                if result is None:
+                    logger.info(f"Audio generation {this_id} - complete")
+                    break
+                if isinstance(result, Exception):
+                    logger.error(f"Audio generation {this_id} - error: {result}")
+                    raise result
+                
+                if chunk_counter == 0:
+                    first_chunk_time = time.time() - generation_start
+                    logger.info(f"Audio generation {this_id} - first chunk latency: {first_chunk_time*1000:.1f}ms")
+                
+                chunk_counter += 1
+                if interrupt_flag.is_set():
+                    logger.info(f"Audio generation {this_id} - interrupt flag set during chunk processing")
+                    break
+                
+                audio_chunk = result
+                all_audio_chunks.append(audio_chunk)
+                chunk_array = audio_chunk.cpu().numpy().astype(np.float32)
+                audio_queue.put(chunk_array)
+                
+                if chunk_counter == 1:
+                    logger.info(f"Sending first audio chunk with ID {this_id}")
+                    asyncio.run_coroutine_threadsafe(
+                        message_queue.put({
+                            "type": "audio_status",
+                            "status": "first_chunk",
+                            "gen_id": this_id,
+                            "session_id": session_id
+                        }),
+                        loop
+                    )
+                    time.sleep(0.1)
+                
+                asyncio.run_coroutine_threadsafe(
+                    message_queue.put({
+                        "type": "audio_chunk",
+                        "audio": chunk_array.tolist(),
+                        "sample_rate": generator.sample_rate,
+                        "gen_id": this_id,
+                        "chunk_num": chunk_counter,
+                        "session_id": session_id
+                    }),
+                    loop
+                )
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"Audio generation {this_id} - error processing result: {e}")
+                break
+        
+        if all_audio_chunks and not interrupt_flag.is_set():
+            try:
+                complete_audio = torch.cat(all_audio_chunks)
+                save_audio_and_trim(output_file, session_id, config.voice_speaker_id, complete_audio, generator.sample_rate)
+                add_segment(text.lower(), config.voice_speaker_id, complete_audio)
+                total_time = time.time() - generation_start
+                total_audio_seconds = complete_audio.size(0) / generator.sample_rate
+                rtf = total_time / total_audio_seconds
+                logger.info(f"Audio generation {this_id} - completed in {total_time:.2f}s, RTF: {rtf:.2f}x")
+            except Exception as e:
+                logger.error(f"Audio generation {this_id} - error saving complete audio: {e}")
+                
+    except Exception as e:
+        import traceback
+        logger.error(f"Audio generation {this_id} - unexpected error: {e}\n{traceback.format_exc()}")
+    finally:
+        is_speaking = False
+        audio_queue.put(None)
+        try:
+            logger.info(f"Audio generation {this_id} - sending completion status")
+            asyncio.run_coroutine_threadsafe(
+                message_queue.put({
+                    "type": "audio_status",
+                    "status": "complete",
+                    "gen_id": this_id,
+                    "session_id": session_id
+                }),
+                loop
+            )
+        except Exception as e:
+            logger.error(f"Audio generation {this_id} - failed to send completion status: {e}")
+        
+        with user_input_lock:
+            if pending_user_inputs:
+                logger.info(f"Audio generation {this_id} - processing pending inputs")
+                process_pending_inputs()
+        
+        logger.info(f"Audio generation {this_id} - releasing lock")
+        audio_gen_lock.release()
+
+
+
 
 
 @app.get("/api/debug/models")
