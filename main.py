@@ -983,6 +983,16 @@ async def websocket_endpoint(websocket: WebSocket):
     })
     logger.info(f"New WebSocket connection for session: {session_id}")
 
+    # TEST: Send immediate welcome message
+    try:
+        await websocket.send_json({
+            "type": "test_response",
+            "message": "WebSocket connected successfully!",
+            "session_id": session_id
+        })
+    except Exception as e:
+        logger.error(f"Error sending welcome message: {e}")
+
     try:
         while True:
             # Receive and process messages from client
