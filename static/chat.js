@@ -163,49 +163,88 @@ function showNotification(msg, type='info'){
                   setTimeout(()=>n.remove(),500)},3000);
 }
 
-function addMessageToConversation(sender, text){
+function addMessageToConversation(sender, text) {
   console.log(`🔄 Attempting to add ${sender} message:`, text);
+  
+  // Validate input
+  if (!text || text.trim() === '') {
+    console.error("❌ Empty message text provided");
+    return;
+  }
   
   const pane = document.getElementById('conversationHistory');
   if (!pane) {
     console.error("❌ Conversation history pane not found! Check if element exists in HTML.");
+    
+    // Try to find the element with different selectors
+    const alternativeSelectors = [
+      '#conversationHistory',
+      '.conversation-container div',
+      '[id*="conversation"]',
+      '[class*="conversation"]'
+    ];
+    
+    for (const selector of alternativeSelectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        console.log(`Found alternative element with selector: ${selector}`, element);
+      }
+    }
     return;
   }
 
   console.log("✅ Found conversation pane, creating message element...");
   
-  const box = document.createElement('div');
-  box.className = `p-3 mb-3 rounded-lg text-sm ${
-    sender === 'user' ? 'bg-gray-800 ml-2' : 'bg-indigo-900 mr-2'
-  }`;
-  
-  const timestamp = new Date().toLocaleTimeString();
-  const escapedText = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
-    .replace(/\n/g, '<br>');
+  try {
+    const box = document.createElement('div');
+    box.className = `p-3 mb-3 rounded-lg text-sm ${
+      sender === 'user' ? 'bg-gray-800 ml-2' : 'bg-indigo-900 mr-2'
+    }`;
+    
+    const timestamp = new Date().toLocaleTimeString();
+    const escapedText = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+      .replace(/\n/g, '<br>');
 
-  box.innerHTML = `
-    <div class="flex items-start mb-2">
-      <div class="w-6 h-6 rounded-full flex items-center justify-center
-           ${sender === 'user' ? 'bg-gray-300 text-gray-800' : 'bg-indigo-500 text-white'}">
-        ${sender === 'user' ? 'U' : 'AI'}
+    box.innerHTML = `
+      <div class="flex items-start mb-2">
+        <div class="w-6 h-6 rounded-full flex items-center justify-center
+             ${sender === 'user' ? 'bg-gray-300 text-gray-800' : 'bg-indigo-500 text-white'}">
+          ${sender === 'user' ? 'U' : 'AI'}
+        </div>
+        <span class="text-xs text-gray-400 ml-2">${timestamp}</span>
       </div>
-      <span class="text-xs text-gray-400 ml-2">${timestamp}</span>
-    </div>
-    <div class="text-white mt-1 text-sm">${escapedText}</div>
-  `;
+      <div class="text-white mt-1 text-sm">${escapedText}</div>
+    `;
 
-  console.log("✅ Message element created, appending to pane...");
-  pane.appendChild(box);
-  
-  // Force scroll to bottom
-  pane.scrollTop = pane.scrollHeight;
-  
-  console.log(`✅ Added ${sender} message to conversation. Total messages: ${pane.children.length}`);
+    console.log("✅ Message element created, appending to pane...");
+    pane.appendChild(box);
+    
+    // Force multiple scroll methods to ensure visibility
+    pane.scrollTop = pane.scrollHeight;
+    setTimeout(() => {
+      pane.scrollTop = pane.scrollHeight;
+    }, 50);
+    
+    console.log(`✅ Added ${sender} message to conversation. Total messages: ${pane.children.length}`);
+    
+    // Verify the message was actually added
+    setTimeout(() => {
+      const lastChild = pane.lastElementChild;
+      if (lastChild && lastChild.textContent.includes(text.substring(0, 20))) {
+        console.log("✅ Message verified in DOM");
+      } else {
+        console.error("❌ Message not found in DOM after addition");
+      }
+    }, 100);
+    
+  } catch (error) {
+    console.error("❌ Error adding message to conversation:", error);
+  }
 }
 
 function connectWebSocket() {
@@ -290,6 +329,9 @@ function connectWebSocket() {
   };
 }
 
+
+
+
 function sendTextMessage(txt) {
   if (!txt.trim()) {
     console.log("Empty message, ignoring");
@@ -316,15 +358,34 @@ function sendTextMessage(txt) {
   console.log("Sending message data:", messageData);
   
   try {
-    // Add user message to UI immediately
+    // Add user message to UI immediately - FORCE DISPLAY
+    console.log("🔄 Adding user message to conversation...");
     addMessageToConversation('user', txt);
+    
+    // Double-check that the message was added
+    setTimeout(() => {
+      const pane = document.getElementById('conversationHistory');
+      if (pane) {
+        console.log("✅ User message should be visible. Total messages in pane:", pane.children.length);
+        // Force scroll to make sure it's visible
+        pane.scrollTop = pane.scrollHeight;
+      }
+    }, 100);
     
     // Update message count
     const cnt = document.getElementById('messageCount');
-    if (cnt) cnt.textContent = ++messageCount;
+    if (cnt) {
+      messageCount++;
+      cnt.textContent = messageCount;
+      console.log("✅ Message count updated to:", messageCount);
+    }
     
     // Clear input
-    document.getElementById('textInput').value = '';
+    const textInput = document.getElementById('textInput');
+    if (textInput) {
+      textInput.value = '';
+      console.log("✅ Input cleared");
+    }
     
     // Show thinking indicator
     showVoiceCircle();
@@ -333,11 +394,15 @@ function sendTextMessage(txt) {
     ws.send(JSON.stringify(messageData));
     
     console.log("✅ Text message sent successfully");
+    
   } catch (error) {
     console.error("❌ Error sending message:", error);
     showNotification("Error sending message", "error");
   }
 }
+
+
+
 
 function clearAudioPlayback() {
   console.log("FORCEFULLY CLEARING AUDIO PLAYBACK");
@@ -986,3 +1051,38 @@ function initAudioLevelsChart() {
     console.error("Error initializing audio chart:", error);
   }
 }
+
+
+
+function checkConversationStyles() {
+  console.log("=== CHECKING CONVERSATION STYLES ===");
+  const pane = document.getElementById('conversationHistory');
+  if (!pane) {
+    console.error("No conversation pane found");
+    return;
+  }
+  
+  const computedStyle = window.getComputedStyle(pane);
+  console.log("Pane styles:");
+  console.log("- display:", computedStyle.display);
+  console.log("- visibility:", computedStyle.visibility);
+  console.log("- opacity:", computedStyle.opacity);
+  console.log("- height:", computedStyle.height);
+  console.log("- overflow:", computedStyle.overflow);
+  console.log("- position:", computedStyle.position);
+  
+  // Check if parent elements are visible
+  let parent = pane.parentElement;
+  let level = 0;
+  while (parent && level < 5) {
+    const parentStyle = window.getComputedStyle(parent);
+    console.log(`Parent ${level} (${parent.tagName}.${parent.className}):`);
+    console.log(`  - display: ${parentStyle.display}`);
+    console.log(`  - visibility: ${parentStyle.visibility}`);
+    console.log(`  - opacity: ${parentStyle.opacity}`);
+    parent = parent.parentElement;
+    level++;
+  }
+}
+
+window.checkConversationStyles = checkConversationStyles;
