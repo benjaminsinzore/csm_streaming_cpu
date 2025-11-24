@@ -74,33 +74,55 @@ function showNotification(msg, type='info'){
                   setTimeout(()=>n.remove(),500)},3000);
 }
 
-function addMessageToConversation(sender,text){
-  const pane=document.getElementById('conversationHistory');
-  if(!pane) {
-    console.error("Conversation history pane not found!");
+
+
+function addMessageToConversation(sender, text) {
+  console.log(`🔄 Attempting to add ${sender} message:`, text);
+  
+  const pane = document.getElementById('conversationHistory');
+  if (!pane) {
+    console.error("❌ Conversation history pane not found! Check if element exists in HTML.");
+    console.log("Available elements with 'conversation' in ID:");
+    // Log all elements that might be related
+    const allElements = document.querySelectorAll('[id*="conversation"]');
+    allElements.forEach(el => console.log("Found:", el.id));
     return;
   }
-  const box=document.createElement('div');
-  box.className=`p-3 mb-3 rounded-lg text-sm ${
-            sender==='user'?'bg-gray-800 ml-2':'bg-indigo-900 mr-2'}`;
-  box.innerHTML=`
-      <div class="flex items-start mb-2">
-        <div class="w-6 h-6 rounded-full flex items-center justify-center
-             ${sender==='user'?'bg-gray-300 text-gray-800':'bg-indigo-500 text-white'}">
-             ${sender==='user'?'U':'AI'}
-        </div>
-        <span class="text-xs text-gray-400 ml-2">${new Date().toLocaleTimeString()}</span>
+
+  console.log("✅ Found conversation pane, creating message element...");
+  
+  const box = document.createElement('div');
+  box.className = `p-3 mb-3 rounded-lg text-sm ${
+    sender === 'user' ? 'bg-gray-800 ml-2' : 'bg-indigo-900 mr-2'
+  }`;
+  
+  const timestamp = new Date().toLocaleTimeString();
+  const escapedText = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+    .replace(/\n/g, '<br>');
+
+  box.innerHTML = `
+    <div class="flex items-start mb-2">
+      <div class="w-6 h-6 rounded-full flex items-center justify-center
+           ${sender === 'user' ? 'bg-gray-300 text-gray-800' : 'bg-indigo-500 text-white'}">
+        ${sender === 'user' ? 'U' : 'AI'}
       </div>
-      <div class="text-white mt-1 text-sm">${text
-            .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-            .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
-            .replace(/\*(.*?)\*/g,'<em>$1</em>')
-            .replace(/```([^`]+)```/g,'<pre><code>$1</code></pre>')
-            .replace(/`([^`]+)`/g,'<code>$1</code>')
-            .replace(/\n/g,'<br>')}</div>`;
+      <span class="text-xs text-gray-400 ml-2">${timestamp}</span>
+    </div>
+    <div class="text-white mt-1 text-sm">${escapedText}</div>
+  `;
+
+  console.log("✅ Message element created, appending to pane...");
   pane.appendChild(box);
-  pane.scrollTop=pane.scrollHeight;
-  console.log(`✅ Added ${sender} message to conversation`);
+  
+  // Force scroll to bottom
+  pane.scrollTop = pane.scrollHeight;
+  
+  console.log(`✅ Added ${sender} message to conversation. Total messages: ${pane.children.length}`);
 }
 
 function connectWebSocket() {
@@ -446,19 +468,21 @@ function requestInterrupt() {
   }
 }
 
+
+
+
 function handleWebSocketMessage(d) {
-  console.log("📨 Received message:", d.type, d);
+  console.log("📨 Received WebSocket message:", d.type, d);
   
   switch(d.type) {
     case 'transcription':
-      console.log("🎤 Transcription:", d.text);
+      console.log("🎤 Processing transcription...");
       addMessageToConversation('user', d.text);
       showVoiceCircle();
       break;
       
     case 'response':
-      console.log("🤖 AI Response:", d.text);
-      // ADD THE AI MESSAGE TO CONVERSATION IMMEDIATELY
+      console.log("🤖 Processing AI response...");
       addMessageToConversation('ai', d.text);
       showVoiceCircle();
       break;
@@ -486,7 +510,6 @@ function handleWebSocketMessage(d) {
       
       if (d.status === 'generating') {
         console.log("🔄 New audio generation starting");
-        // Reset interrupt flags for new generation
         interruptRequested = false;
         interruptInProgress = false;
         
@@ -503,7 +526,6 @@ function handleWebSocketMessage(d) {
       }
       else if (d.status === 'complete') {
         console.log("✅ Audio generation complete");
-        // Reset for next generation
         activeGenId = 0;
         if (!isAudioCurrentlyPlaying) {
           hideVoiceCircle();
@@ -535,7 +557,6 @@ function handleWebSocketMessage(d) {
       }
       break;
 
-    // Add this case to handle test responses
     case 'test_response':
       console.log("✅ Test response received:", d.message);
       showNotification(d.message, 'success');
@@ -545,6 +566,9 @@ function handleWebSocketMessage(d) {
       console.log("❓ Unknown message type:", d.type);
   }
 }
+
+
+
 
 function queueAudioForPlayback(arr, sr, genId = 0) {
   console.log("🎵 Queueing audio chunk - genId:", genId, "queue length:", audioPlaybackQueue.length);
@@ -1024,3 +1048,22 @@ function initAudioLevelsChart() {
     console.error("Error initializing audio chart:", error);
   }
 }
+
+
+
+
+// Add this debug function
+function debugConversationHistory() {
+  console.log("=== DEBUG CONVERSATION HISTORY ===");
+  const pane = document.getElementById('conversationHistory');
+  console.log("Conversation pane element:", pane);
+  console.log("Pane exists:", !!pane);
+  if (pane) {
+    console.log("Pane children:", pane.children.length);
+    console.log("Pane innerHTML:", pane.innerHTML);
+    console.log("Pane classList:", pane.classList);
+  }
+}
+
+// Make it available globally
+window.debugConversationHistory = debugConversationHistory;
