@@ -1882,16 +1882,18 @@ async def chat_page(request: Request):
 
 
 
+# History and user endpoints
 @app.get("/history", response_class=HTMLResponse)
 async def history_page(request: Request):
-    # Simple history page - you can enhance this later
     current_user = await get_current_user(request)
     if not current_user:
         return RedirectResponse(url="/login")
     
     return templates.TemplateResponse("history.html", {
         "request": request,
-        "user_email": current_user.email
+        "user_email": current_user.email,
+        "user_id": current_user.id,
+        "created_at": current_user.created_at
     })
 
 @app.get("/api/user/conversations")
@@ -1901,19 +1903,66 @@ async def get_user_conversations(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     db = SessionLocal()
-    conversations = db.query(Conversation).filter(
-        Conversation.user_id == current_user.id
-    ).order_by(Conversation.timestamp.desc()).limit(50).all()
+    try:
+        conversations = db.query(Conversation).filter(
+            Conversation.user_id == current_user.id
+        ).order_by(Conversation.timestamp.desc()).limit(50).all()
+        
+        return [{
+            "id": conv.id,
+            "timestamp": conv.timestamp,
+            "user_message": conv.user_message,
+            "ai_message": conv.ai_message,
+            "audio_path": conv.audio_path
+        } for conv in conversations]
+    except Exception as e:
+        logger.error(f"Error fetching conversations: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching conversations")
+    finally:
+        db.close()
+
+
+
+
+@app.get("/api/user/profile")
+async def get_user_profile(request: Request):
+    current_user = await get_current_user(request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     
-    db.close()
+    return {
+        "email": current_user.email,
+        "user_id": current_user.id,
+        "created_at": current_user.created_at
+    }        
+
+
+
+@app.delete("/api/user/conversations")
+async def delete_user_conversations(request: Request):
+    current_user = await get_current_user(request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     
-    return [{
-        "id": conv.id,
-        "timestamp": conv.timestamp,
-        "user_message": conv.user_message,
-        "ai_message": conv.ai_message,
-        "audio_path": conv.audio_path
-    } for conv in conversations]
+    db = SessionLocal()
+    try:
+        # Delete user's conversations
+        deleted_count = db.query(Conversation).filter(
+            Conversation.user_id == current_user.id
+        ).delete()
+        
+        db.commit()
+        
+        return {
+            "message": f"Deleted {deleted_count} conversations",
+            "deleted_count": deleted_count
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting conversations: {e}")
+        raise HTTPException(status_code=500, detail="Error deleting conversations")
+    finally:
+        db.close()
 
 
 

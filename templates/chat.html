@@ -107,12 +107,22 @@
 
   <div id="voice-circle"></div>
 
-  <header class="header-container bg-gray-900 p-4 flex justify-between items-center shadow-md">
-    <h1 class="text-2xl font-bold text-indigo-400">AI Companion</h1>
-    <button id="settingsBtn" class="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded shadow">
-      Settings
-    </button>
-  </header>
+<header class="header-container bg-gray-900 p-4 flex justify-between items-center shadow-md">
+    <div class="flex items-center space-x-4">
+        <h1 class="text-2xl font-bold text-indigo-400">AI Companion</h1>
+        <div class="text-sm text-gray-300 bg-gray-800 px-3 py-1 rounded-full">
+            User: <span id="currentUserEmail">Loading...</span>
+        </div>
+    </div>
+    <div class="flex space-x-4">
+        <a href="/history" class="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded shadow">
+            History
+        </a>
+        <button id="settingsBtn" class="bg-indigo-700 hover:bg-indigo-800 text-white px-4 py-2 rounded shadow">
+            Settings
+        </button>
+    </div>
+</header>
 
   <div class="flex flex-row">
     
