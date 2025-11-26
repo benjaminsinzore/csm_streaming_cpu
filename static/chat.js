@@ -1152,3 +1152,468 @@ async function loadConversation(conversationId) {
 document.getElementById('refreshHistoryBtn').addEventListener('click', () => {
     this.loadConversationHistory();
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ==================== USER INFO & HISTORY FUNCTIONS ====================
+
+async function loadUserInfo() {
+  try {
+    console.log("👤 Loading user info...");
+    const response = await fetch('/api/user/profile');
+    if (response.ok) {
+      const userData = await response.json();
+      const userEmailElement = document.getElementById('currentUserEmail');
+      if (userEmailElement) {
+        userEmailElement.textContent = userData.email;
+        console.log("✅ User info loaded:", userData.email);
+      }
+    } else {
+      console.error('❌ Failed to load user profile:', response.status);
+      const userEmailElement = document.getElementById('currentUserEmail');
+      if (userEmailElement) {
+        userEmailElement.textContent = 'Not logged in';
+      }
+    }
+  } catch (error) {
+    console.error('❌ Failed to load user info:', error);
+    const userEmailElement = document.getElementById('currentUserEmail');
+    if (userEmailElement) {
+      userEmailElement.textContent = 'Error loading';
+    }
+  }
+}
+
+async function checkSystemStatus() {
+  try {
+    console.log("🔧 Checking system status...");
+    const response = await fetch('/api/status');
+    if (response.ok) {
+      const status = await response.json();
+      updateModelStatus(status);
+    } else {
+      console.error('❌ Failed to check system status:', response.status);
+      updateModelStatus({ models_loaded: false });
+    }
+  } catch (error) {
+    console.error('❌ Failed to check system status:', error);
+    updateModelStatus({ models_loaded: false });
+  }
+}
+
+function updateModelStatus(status) {
+  const element = document.getElementById('modelStatus');
+  if (!element) {
+    console.error("❌ modelStatus element not found");
+    return;
+  }
+  
+  if (status.models_loaded) {
+    const loadedModels = [];
+    if (status.whisper_loaded) loadedModels.push('Speech');
+    if (status.llm_loaded) loadedModels.push('LLM');
+    if (status.rag_loaded) loadedModels.push('RAG');
+    
+    if (loadedModels.length > 0) {
+      element.textContent = loadedModels.join(', ');
+      element.className = 'text-green-400';
+      console.log("✅ Models status updated:", loadedModels.join(', '));
+    } else {
+      element.textContent = 'No models loaded';
+      element.className = 'text-red-400';
+      console.log("❌ No models loaded");
+    }
+  } else {
+    element.textContent = 'Checking...';
+    element.className = 'text-yellow-400';
+    console.log("⏳ Models status: Checking...");
+  }
+}
+
+async function loadConversationHistory() {
+  try {
+    console.log("📚 Loading conversation history...");
+    const response = await fetch('/api/user/conversations');
+    if (response.ok) {
+      const conversations = await response.json();
+      console.log("✅ Loaded conversations:", conversations.length);
+      displayHistoryList(conversations);
+    } else {
+      console.error('❌ Failed to load conversation history:', response.status);
+      displayHistoryList([]);
+    }
+  } catch (error) {
+    console.error('❌ Failed to load conversation history:', error);
+    displayHistoryList([]);
+  }
+}
+
+function displayHistoryList(conversations) {
+  const historyList = document.getElementById('historyList');
+  if (!historyList) {
+    console.error("❌ historyList element not found");
+    return;
+  }
+  
+  if (!conversations || conversations.length === 0) {
+    historyList.innerHTML = `
+      <div class="text-gray-400 text-center py-8">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+        </svg>
+        <p>No recent conversations</p>
+        <p class="text-xs mt-2">Start chatting to see history here</p>
+      </div>
+    `;
+    return;
+  }
+
+  // Sort conversations by timestamp (newest first)
+  conversations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  historyList.innerHTML = conversations.slice(0, 20).map(conv => `
+    <div class="history-item p-3 rounded-lg cursor-pointer bg-gray-800 hover:bg-gray-700 transition-colors" data-conv-id="${conv.id}">
+      <div class="flex justify-between items-start mb-2">
+        <span class="text-xs text-gray-400">${new Date(conv.timestamp).toLocaleDateString()}</span>
+        <span class="text-xs text-indigo-400">${new Date(conv.timestamp).toLocaleTimeString()}</span>
+      </div>
+      <div class="text-sm font-medium truncate mb-1" title="${escapeHtml(conv.user_message)}">
+        ${escapeHtml(conv.user_message.substring(0, 50))}${conv.user_message.length > 50 ? '...' : ''}
+      </div>
+      <div class="text-xs text-gray-400 truncate" title="${escapeHtml(conv.ai_message)}">
+        ${escapeHtml(conv.ai_message.substring(0, 60))}${conv.ai_message.length > 60 ? '...' : ''}
+      </div>
+    </div>
+  `).join('');
+
+  // Add click handlers
+  historyList.querySelectorAll('.history-item').forEach(item => {
+    item.addEventListener('click', () => {
+      loadConversation(item.dataset.convId);
+    });
+  });
+  
+  console.log("✅ History list updated with", conversations.length, "conversations");
+}
+
+async function loadConversation(conversationId) {
+  try {
+    console.log("📖 Loading conversation:", conversationId);
+    const response = await fetch(`/api/conversations/${conversationId}`);
+    if (response.ok) {
+      const conversation = await response.json();
+      displayConversation(conversation);
+      showNotification('Conversation loaded', 'info');
+    }
+  } catch (error) {
+    console.error('❌ Failed to load conversation:', error);
+    showNotification('Failed to load conversation', 'error');
+  }
+}
+
+function displayConversation(conversation) {
+  // Clear current conversation
+  const conversationDiv = document.getElementById('conversationHistory');
+  if (conversationDiv) {
+    conversationDiv.innerHTML = '';
+  }
+  
+  // Add the conversation messages
+  addMessageToConversation('user', conversation.user_message);
+  addMessageToConversation('ai', conversation.ai_message);
+  
+  console.log("✅ Conversation displayed");
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ==================== ENHANCED SETUP FUNCTION ====================
+
+async function setupChatUI() {
+  console.log("🚀 Setting up enhanced chat UI...");
+  
+  document.documentElement.classList.add('bg-gray-950');
+  document.documentElement.style.backgroundColor = '#030712';
+
+  createPermanentVoiceCircle();
+  connectWebSocket();
+
+  // Load user info and system status
+  await loadUserInfo();
+  await checkSystemStatus();
+  await loadConversationHistory();
+
+  // Set up periodic status checks
+  setInterval(checkSystemStatus, 10000); // Check every 10 seconds
+  setInterval(loadConversationHistory, 30000); // Refresh history every 30 seconds
+
+  initAudioLevelsChart();
+
+  const txt = document.getElementById('textInput');
+  const btn = document.getElementById('sendTextBtn');
+  
+  // Setup enhanced interrupt button
+  const interruptBtn = document.createElement('button');
+  interruptBtn.id = 'interruptBtn';
+  interruptBtn.className = 'px-3 py-2 ml-2 bg-red-600 text-white rounded hover:bg-red-700 flex items-center transition duration-150';
+  interruptBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" /></svg> Stop';
+  interruptBtn.onclick = (e) => {
+    e.preventDefault();
+    try {
+      requestInterrupt();
+      interruptBtn.classList.add('bg-red-800', 'scale-95');
+      setTimeout(() => interruptBtn.classList.remove('bg-red-800', 'scale-95'), 150);
+    } catch (error) {
+      console.error("Error in interrupt button handler:", error);
+    }
+  };
+  interruptBtn.title = "Stop AI speech (Space or Esc)";
+  interruptBtn.disabled = true;
+  interruptBtn.classList.add('opacity-50', 'cursor-not-allowed');
+  
+  if (btn && btn.parentElement) {
+    btn.parentElement.appendChild(interruptBtn);
+  }
+  
+  // Add refresh history button handler
+  const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
+  if (refreshHistoryBtn) {
+    refreshHistoryBtn.addEventListener('click', () => {
+      console.log("🔄 Manual history refresh requested");
+      loadConversationHistory();
+      showNotification('Refreshing history...', 'info');
+    });
+  }
+  
+  // Add debug button for easier debugging of interrupt issues
+  const debugBtn = document.createElement('button');
+  debugBtn.innerText = "Debug Audio";
+  debugBtn.className = "px-3 py-2 ml-2 bg-blue-600 text-white rounded text-xs";
+  debugBtn.onclick = () => {
+    console.log("- Debug info:");
+    console.log("- Audio playing:", isAudioCurrentlyPlaying);
+    console.log("- Interrupt requested:", interruptRequested);
+    console.log("- Interrupt in progress:", interruptInProgress);
+    console.log("- Current source:", currentAudioSource);
+    console.log("- Queue length:", audioPlaybackQueue.length);
+    console.log("- Audio context state:", audioContext?.state);
+    console.log("- Active generation ID:", activeGenId);
+    console.log("- Last seen generation ID:", lastSeenGenId);
+    console.log("- WebSocket state:", ws ? ws.readyState : "no websocket");
+    showNotification("Debug info in console", "info");
+  };
+  
+  if (btn && btn.parentElement) {
+    btn.parentElement.appendChild(debugBtn);
+  }
+  
+  // Run the update function periodically
+  setInterval(() => {
+    const interruptBtn = document.getElementById('interruptBtn');
+    if (interruptBtn) {
+      if (isAudioCurrentlyPlaying && !interruptRequested && !interruptInProgress) {
+        interruptBtn.disabled = false;
+        interruptBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      } else {
+        interruptBtn.disabled = true;
+        interruptBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+    }
+  }, 300);
+  
+  if (btn) {
+    btn.onclick = () => {
+      try {
+        sendTextMessage(txt.value);
+      } catch (error) {
+        console.error("Error in send button handler:", error);
+      }
+    };
+  }
+  
+  if (txt) {
+    txt.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        try {
+          sendTextMessage(txt.value);
+        } catch (error) {
+          console.error("Error in text input handler:", error);
+        }
+      }
+    });
+  }
+  
+  const micBtn = document.getElementById('micToggleBtn');
+  if (micBtn) {
+    micBtn.addEventListener('click', () => {
+      try {
+        if (isRecording) stopRecording();
+        else startRecording();
+      } catch (error) {
+        console.error("Error in mic button handler:", error);
+      }
+    });
+  }
+  
+  // Add event listeners to detect keyboard interruptions
+  document.addEventListener('keydown', e => {
+    if ((e.code === 'Space' || e.code === 'Escape') && isAudioCurrentlyPlaying) {
+      e.preventDefault();
+      try {
+        requestInterrupt();
+        
+        const interruptBtn = document.getElementById('interruptBtn');
+        if (interruptBtn) {
+          interruptBtn.classList.add('bg-red-800');
+          setTimeout(() => {
+            interruptBtn.classList.remove('bg-red-800');
+          }, 200);
+        }
+      } catch (error) {
+        console.error("Error in keyboard interrupt handler:", error);
+      }
+    }
+  });
+  
+  // Initialize audio context
+  if (!audioContext) {
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      window.audioContext = audioContext;
+    } catch (error) {
+      console.error("Error creating audio context:", error);
+      showNotification("Audio initialization failed. Please refresh the page.", "error");
+    }
+  }
+  
+  // Try to unlock audio context on user interaction
+  ['click', 'touchstart', 'keydown'].forEach(ev =>
+    document.addEventListener(ev, function unlock() {
+      if (audioContext && audioContext.state === 'suspended') {
+        try {
+          audioContext.resume();
+        } catch (error) {
+          console.warn("Error resuming audio context:", error);
+        }
+      }
+      document.removeEventListener(ev, unlock);
+    })
+  );
+
+  console.log("✅ Enhanced chat UI ready with user info, model status, and conversation history");
+}
+
+// Update the WebSocket message handler to refresh history when new messages are received
+function handleWebSocketMessage(d) {
+  console.log("📨 Received WebSocket message:", d.type, d);
+  
+  switch(d.type) {
+    case 'transcription':
+      console.log("🎤 Processing transcription...");
+      addMessageToConversation('user', d.text);
+      showVoiceCircle();
+      break;
+      
+    case 'response':
+      console.log("🤖 Processing AI response...");
+      addMessageToConversation('ai', d.text);
+      showVoiceCircle();
+      // Refresh history when new response is received
+      setTimeout(() => loadConversationHistory(), 1000);
+      break;
+      
+    case 'audio_chunk':
+      console.log("🔊 Audio chunk received - genId:", d.gen_id, "activeGenId:", activeGenId);
+      
+      if (activeGenId === 0 && d.gen_id) {
+        activeGenId = d.gen_id;
+        console.log("🎯 Setting active generation ID to:", activeGenId);
+      }
+      
+      if (activeGenId === 0 || d.gen_id === activeGenId) {
+        queueAudioForPlayback(d.audio, d.sample_rate, d.gen_id || 0);
+        showVoiceCircle();
+      } else {
+        console.log("🚫 Ignoring audio chunk - generation ID mismatch");
+      }
+      break;
+      
+    case 'audio_status':
+      console.log("🔊 Audio status:", d.status, "genId:", d.gen_id);
+      
+      if (d.status === 'generating') {
+        console.log("🔄 New audio generation starting");
+        interruptRequested = false;
+        interruptInProgress = false;
+        
+        if (d.gen_id) {
+          activeGenId = d.gen_id;
+          console.log("🎯 Active generation set to:", activeGenId);
+        }
+        
+        showVoiceCircle();
+      } 
+      else if (d.status === 'first_chunk') {
+        console.log("🎵 First audio chunk ready");
+        showVoiceCircle();
+      }
+      else if (d.status === 'complete') {
+        console.log("✅ Audio generation complete");
+        activeGenId = 0;
+        if (!isAudioCurrentlyPlaying) {
+          hideVoiceCircle();
+        }
+        // Refresh history when audio completes
+        setTimeout(() => loadConversationHistory(), 500);
+      } 
+      else if (d.status === 'interrupted' || d.status === 'interrupt_acknowledged') {
+        console.log("⏹️ Audio interrupted by server");
+        clearAudioPlayback();
+      }
+      break;
+      
+    case 'status':
+      console.log("ℹ️ Status:", d.message);
+      if (d.message === 'Thinking...') {
+        showVoiceCircle();
+      }
+      break;
+      
+    case 'error':
+      console.error("❌ Error:", d.message);
+      showNotification(d.message, 'error');
+      hideVoiceCircle();
+      break;
+      
+    case 'vad_status':
+      console.log("🎤 VAD Status:", d.status);
+      if (d.status === 'speech_started') {
+        showVoiceCircle();
+      }
+      break;
+
+    case 'test_response':
+      console.log("✅ Test response received:", d.message);
+      showNotification(d.message, 'success');
+      break;
+      
+    default:
+      console.log("❓ Unknown message type:", d.type);
+  }
+}
