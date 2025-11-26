@@ -1,4 +1,6 @@
-// chat.js - Complete with user-specific conversation history
+// chat.js
+
+// --- State Variables ---
 let ws;
 let sessionStartTime = null;
 let messageCount = 0;
@@ -6,1350 +8,1225 @@ let audioLevelsChart = null;
 let isRecording = false;
 let isAudioCurrentlyPlaying = false;
 let configSaved = false;
-let currentAudioSource = null; 
-let interruptRequested = false; 
+let currentAudioSource = null;
+let interruptRequested = false;
 let interruptInProgress = false;
 let audioContext = null;
 let lastSeenGenId = 0;
 let reconnecting = false;
 let reconnectAttempts = 0;
 let maxReconnectAttempts = 10;
-
-// Conversation history variables
-let conversationHistoryLoaded = false;
-let allUserConversations = [];
-let currentUserId = null;
-
 const SESSION_ID = "default_" + Date.now();
 console.log("chat.js loaded - Session ID:", SESSION_ID);
 
 let micStream;
 let selectedMicId = null;
 let selectedOutputId = null;
+let audioPlaybackQueue = []; // Queue for audio chunks
+let activeGenId = 0; // Track the current generation ID for audio playback
 
-let audioPlaybackQueue = [];
-let audioDataHistory = [];
-let micAnalyser, micContext;
-let activeGenId = 0;
+// --- DOM Ready and Initialization ---
+document.addEventListener('DOMContentLoaded', function () {
+    console.log("🚀 DOM loaded, initializing chat...");
+    loadUserInfo();
+    loadConversationHistory(); // Load history on page load
+    connectWebSocket(); // Connect to WebSocket
+    initializeAudioChart(); // Initialize audio visualization chart
+    setupEventListeners(); // Setup button and input listeners
+    checkSystemStatus(); // Check backend status
+    startDurationTimer(); // Start session duration timer
+    initializeSettingsModal(); // Setup settings modal interactions
 
-// ==================== USER INFO & CONVERSATION HISTORY ====================
+    // Make debug functions available globally for console access
+    window.debugConversationHistory = debugConversationHistory;
+    window.debugWebSocket = debugWebSocket;
+    window.testMessageDisplay = testMessageDisplay;
+    window.testFullFlow = testFullFlow;
+    window.checkConversationStyles = checkConversationStyles;
+});
 
-async function loadUserInfo() {
-  try {
-    console.log("👤 Loading user info...");
-    const response = await fetch('/api/user/profile');
-    
-    if (response.ok) {
-      const userData = await response.json();
-      const userEmailElement = document.getElementById('currentUserEmail');
-      if (userEmailElement) {
-        userEmailElement.textContent = userData.email;
-        currentUserId = userData.user_id;
-        console.log("✅ User info loaded:", userData.email, "User ID:", currentUserId);
-        
-        // Load user-specific conversations after user info is loaded
-        loadConversationHistory();
-      }
-    } else if (response.status === 401) {
-      console.log("⚠️ User not authenticated");
-      const userEmailElement = document.getElementById('currentUserEmail');
-      if (userEmailElement) {
-        userEmailElement.textContent = 'Please log in';
-        userEmailElement.className = 'text-red-400';
-      }
-      displayHistoryList([]);
-    } else {
-      console.error('❌ Failed to load user profile:', response.status);
-      const userEmailElement = document.getElementById('currentUserEmail');
-      if (userEmailElement) {
-        userEmailElement.textContent = 'Error loading';
-        userEmailElement.className = 'text-red-400';
-      }
+function setupEventListeners() {
+    console.log("🔧 Setting up event listeners...");
+    const sendBtn = document.getElementById('sendTextBtn');
+    const textInput = document.getElementById('textInput');
+    const micBtn = document.getElementById('micToggleBtn');
+    const interruptBtn = document.getElementById('interruptBtn');
+    const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+
+    if (sendBtn) {
+        sendBtn.onclick = () => {
+            try {
+                sendTextMessage(textInput.value);
+            } catch (error) {
+                console.error("Error in send button handler:", error);
+            }
+        };
     }
-  } catch (error) {
-    console.error('❌ Failed to load user info:', error);
-    const userEmailElement = document.getElementById('currentUserEmail');
-    if (userEmailElement) {
-      userEmailElement.textContent = 'Connection error';
-      userEmailElement.className = 'text-red-400';
+
+    if (textInput) {
+        textInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                try {
+                    sendTextMessage(textInput.value);
+                } catch (error) {
+                    console.error("Error in text input handler:", error);
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                requestInterrupt();
+            }
+        });
     }
-  }
-}
 
-async function loadConversationHistory() {
-  try {
-    console.log("📚 Loading user-specific conversation history...");
-    
-    if (!currentUserId) {
-      console.log("⚠️ No user ID available, cannot load conversations");
-      displayHistoryList([]);
-      return;
+    if (micBtn) {
+        micBtn.addEventListener('click', toggleMic);
     }
-    
-    const response = await fetch('/api/user/conversations');
-    
-    if (response.ok) {
-      const conversations = await response.json();
-      console.log("✅ User conversations received:", conversations.length, "items");
-      allUserConversations = conversations;
-      displayHistoryList(conversations);
-      conversationHistoryLoaded = true;
-      
-      // Update the history panel title to show count
-      const historyTitle = document.querySelector('.history-container h2');
-      if (historyTitle) {
-        historyTitle.textContent = `Your Conversations (${conversations.length})`;
-      }
-      
-    } else if (response.status === 401) {
-      console.log("🔐 Authentication required for conversation history");
-      displayHistoryList([]);
-    } else {
-      console.error('❌ Failed to load conversation history:', response.status);
-      displayHistoryList([]);
+
+    if (interruptBtn) {
+        interruptBtn.addEventListener('click', requestInterrupt);
     }
-  } catch (error) {
-    console.error('❌ Failed to load conversation history:', error);
-    displayHistoryList([]);
-  }
-}
 
-function displayHistoryList(conversations) {
-  const historyList = document.getElementById('historyList');
-  if (!historyList) {
-    console.error("❌ historyList element not found");
-    return;
-  }
-  
-  console.log("🔄 Displaying history list with", conversations?.length || 0, "conversations");
-  
-  if (!conversations || conversations.length === 0) {
-    historyList.innerHTML = `
-      <div class="text-gray-400 text-center py-8">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-        </svg>
-        <p class="text-sm">No conversations yet</p>
-        <p class="text-xs mt-2 text-gray-500">Start chatting to see your history here</p>
-        <button onclick="loadConversationHistory()" class="mt-3 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-xs transition-colors">
-          Refresh History
-        </button>
-      </div>
-    `;
-    return;
-  }
+    if (refreshHistoryBtn) {
+        // Corrected: Use 'this.loadConversationHistory()' or just 'loadConversationHistory()'
+        // 'this' here refers to the button element, not the global scope where the function is defined
+        refreshHistoryBtn.addEventListener('click', () => {
+            loadConversationHistory(); // Fetch and display the latest history
+        });
+    }
 
-  // Sort conversations by timestamp (newest first)
-  conversations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    if (settingsBtn) {
+        settingsBtn.addEventListener('click', () => {
+            document.getElementById('settingsModal').classList.remove('hidden');
+        });
+    }
 
-  // Show ALL user conversations
-  historyList.innerHTML = conversations.map((conv, index) => `
-    <div class="history-item p-3 rounded-lg cursor-pointer bg-gray-800 hover:bg-gray-700 transition-all duration-200 border border-gray-700 hover:border-indigo-500 mb-2" 
-         data-conv-id="${conv.id}" 
-         data-timestamp="${conv.timestamp}">
-      <div class="flex justify-between items-start mb-2">
-        <span class="text-xs text-gray-400">#${conversations.length - index}</span>
-        <span class="text-xs text-indigo-400">${formatTimestamp(conv.timestamp)}</span>
-      </div>
-      <div class="text-sm font-medium text-white truncate mb-1" title="${escapeHtml(conv.user_message || 'No message')}">
-        <span class="text-indigo-300">Q:</span> ${escapeHtml((conv.user_message || 'No message').substring(0, 45))}${conv.user_message && conv.user_message.length > 45 ? '...' : ''}
-      </div>
-      <div class="text-xs text-gray-300 truncate" title="${escapeHtml(conv.ai_message || 'No response')}">
-        <span class="text-green-300">A:</span> ${escapeHtml((conv.ai_message || 'No response').substring(0, 55))}${conv.ai_message && conv.ai_message.length > 55 ? '...' : ''}
-      </div>
-    </div>
-  `).join('');
+    if (closeSettingsBtn) {
+        closeSettingsBtn.addEventListener('click', () => {
+            document.getElementById('settingsModal').classList.add('hidden');
+        });
+    }
 
-  // Add click handlers
-  const items = historyList.querySelectorAll('.history-item');
-  console.log("🖱️ Added click handlers to", items.length, "history items");
-  
-  items.forEach(item => {
-    item.addEventListener('click', function() {
-      // Visual feedback
-      this.classList.add('bg-indigo-900', 'border-indigo-400');
-      setTimeout(() => {
-        this.classList.remove('bg-indigo-900', 'border-indigo-400');
-      }, 300);
-      
-      const convId = this.dataset.convId;
-      console.log("📖 Loading conversation:", convId);
-      loadConversation(convId);
+    // Add debug button
+    const btn = document.getElementById('sendTextBtn');
+    if (btn && btn.parentElement) {
+        const debugBtn = document.createElement('button');
+        debugBtn.innerText = "Debug Audio";
+        debugBtn.className = "px-3 py-2 ml-2 bg-blue-600 text-white rounded text-xs";
+        debugBtn.onclick = () => {
+            console.log("- Debug info:");
+            console.log("- Audio playing:", isAudioCurrentlyPlaying);
+            console.log("- Interrupt requested:", interruptRequested);
+            console.log("- Interrupt in progress:", interruptInProgress);
+            console.log("- Current source:", currentAudioSource);
+            console.log("- Queue length:", audioPlaybackQueue.length);
+            console.log("- Audio context state:", audioContext?.state);
+            console.log("- Active generation ID:", activeGenId);
+            console.log("- Last seen generation ID:", lastSeenGenId);
+            console.log("- WebSocket state:", ws ? ws.readyState : "no websocket");
+            showNotification("Debug info in console", "info");
+        };
+        btn.parentElement.appendChild(debugBtn);
+    }
+
+    // Run the update function periodically for interrupt button state
+    setInterval(() => {
+        const interruptBtn = document.getElementById('interruptBtn');
+        if (interruptBtn) {
+            if (isAudioCurrentlyPlaying && !interruptRequested && !interruptInProgress) {
+                interruptBtn.disabled = false;
+                interruptBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            } else {
+                interruptBtn.disabled = true;
+                interruptBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        }
+    }, 300);
+
+    // Add keyboard shortcut for interrupt (Space or Escape)
+    document.addEventListener('keydown', (e) => {
+        if ((e.code === 'Space' || e.code === 'Escape') && (isAudioCurrentlyPlaying || interruptInProgress)) {
+            e.preventDefault(); // Prevent default space scroll behavior
+            requestInterrupt();
+        }
     });
-  });
-  
-  console.log("✅ History list updated with", conversations.length, "user conversations");
+
+    console.log("✅ Event listeners set up.");
 }
 
-function formatTimestamp(timestamp) {
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diffMs = now - date;
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  
-  return date.toLocaleDateString();
-}
-
-async function loadConversation(conversationId) {
-  try {
-    console.log("📖 Loading user conversation:", conversationId);
-    const response = await fetch(`/api/user/conversations/${conversationId}`);
-    
-    if (response.ok) {
-      const conversation = await response.json();
-      console.log("✅ User conversation loaded successfully");
-      displayConversation(conversation);
-      showNotification('Conversation loaded', 'success');
-    } else {
-      console.error('❌ Failed to load conversation:', response.status);
-      
-      // Try to find the conversation in our cached list
-      const cachedConv = allUserConversations.find(c => c.id == conversationId);
-      if (cachedConv) {
-        console.log("✅ Using cached conversation data");
-        displayConversation(cachedConv);
-        showNotification('Conversation loaded from cache', 'info');
-      } else {
-        showNotification('Conversation not found', 'error');
-      }
-    }
-  } catch (error) {
-    console.error('❌ Failed to load conversation:', error);
-    
-    // Try cached version as fallback
-    const cachedConv = allUserConversations.find(c => c.id == conversationId);
-    if (cachedConv) {
-      console.log("✅ Using cached conversation as fallback");
-      displayConversation(cachedConv);
-      showNotification('Conversation loaded from cache', 'info');
-    } else {
-      showNotification('Failed to load conversation', 'error');
-    }
-  }
-}
-
-function displayConversation(conversation) {
-  // Clear current conversation
-  const conversationDiv = document.getElementById('conversationHistory');
-  if (conversationDiv) {
-    conversationDiv.innerHTML = '';
-    console.log("🧹 Cleared current conversation view");
-  }
-  
-  // Add the conversation messages with proper styling
-  if (conversation.user_message) {
-    addMessageToConversation('user', conversation.user_message, conversation.timestamp);
-  }
-  if (conversation.ai_message) {
-    addMessageToConversation('ai', conversation.ai_message, conversation.timestamp);
-  }
-  
-  // Update the conversation header to show it's a loaded history
-  const convHeader = document.querySelector('.conversation-container h2');
-  if (convHeader) {
-    const originalText = 'Current Conversation';
-    const timeAgo = formatTimestamp(conversation.timestamp);
-    convHeader.innerHTML = `Loaded Conversation <span class="text-sm text-gray-400">(${timeAgo})</span>`;
-    
-    // Reset after 5 seconds
-    setTimeout(() => {
-      convHeader.textContent = originalText;
-    }, 5000);
-  }
-  
-  console.log("✅ Historical conversation displayed");
-}
-
-// ==================== SYSTEM STATUS FUNCTIONS ====================
-
-async function checkSystemStatus() {
-  try {
-    console.log("🔧 Checking system status...");
-    const response = await fetch('/api/status');
-    
-    if (response.ok) {
-      const status = await response.json();
-      console.log("✅ Status data received");
-      updateModelStatus(status);
-    } else {
-      console.error('❌ Failed to check system status:', response.status);
-      updateModelStatus({ models_loaded: false });
-    }
-  } catch (error) {
-    console.error('❌ Failed to check system status:', error);
-    updateModelStatus({ models_loaded: false });
-  }
-}
-
-function updateModelStatus(status) {
-  const element = document.getElementById('modelStatus');
-  if (!element) {
-    console.error("❌ modelStatus element not found");
-    return;
-  }
-  
-  if (status.models_loaded) {
-    const loadedModels = [];
-    if (status.whisper_loaded) loadedModels.push('Speech');
-    if (status.llm_loaded) loadedModels.push('LLM');
-    if (status.rag_loaded) loadedModels.push('RAG');
-    
-    if (loadedModels.length > 0) {
-      element.textContent = loadedModels.join(', ');
-      element.className = 'text-green-400';
-      console.log("✅ Models status updated:", loadedModels.join(', '));
-    } else {
-      element.textContent = 'No models loaded';
-      element.className = 'text-red-400';
-    }
-  } else {
-    element.textContent = 'Not loaded';
-    element.className = 'text-red-400';
-  }
-}
-
-// ==================== DEBUG FUNCTIONS ====================
-
-function debugConversationHistory() {
-  console.log("=== DEBUG CONVERSATION HISTORY ===");
-  const pane = document.getElementById('conversationHistory');
-  console.log("Conversation pane element:", pane);
-  console.log("Pane exists:", !!pane);
-  if (pane) {
-    console.log("Pane children:", pane.children.length);
-    console.log("Pane innerHTML:", pane.innerHTML);
-    console.log("Pane classList:", pane.classList);
-  } else {
-    console.error("❌ Conversation history pane not found!");
-  }
-}
-
-function debugWebSocket() {
-  console.log("=== WEBSOCKET DEBUG ===");
-  console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
-  console.log("Active generation ID:", activeGenId);
-  console.log("Audio playing:", isAudioCurrentlyPlaying);
-  console.log("Queue length:", audioPlaybackQueue.length);
-  console.log("Interrupt flags:", {interruptRequested, interruptInProgress});
-  
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    const testMsg = {
-      type: 'test',
-      message: 'Debug test',
-      session_id: SESSION_ID
-    };
-    console.log("Sending test message:", testMsg);
-    ws.send(JSON.stringify(testMsg));
-  }
-}
-
-function testMessageDisplay() {
-  console.log("🧪 Testing message display...");
-  
-  // Test adding a user message
-  addMessageToConversation('user', 'Test user message from console');
-  
-  // Test adding an AI message
-  addMessageToConversation('ai', 'Test AI message from console');
-  
-  // Check if they appeared
-  debugConversationHistory();
-}
-
-function testFullFlow() {
-  console.log("=== TESTING FULL FLOW ===");
-  
-  // Test 1: Check conversation pane
-  debugConversationHistory();
-  
-  // Test 2: Test WebSocket connection
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    console.log("✅ WebSocket is connected");
-    
-    // Send a test message
-    const testMsg = {
-      type: 'test',
-      message: 'Full flow test',
-      session_id: SESSION_ID,
-      timestamp: new Date().toISOString()
-    };
-    console.log("Sending test message:", testMsg);
-    ws.send(JSON.stringify(testMsg));
-    
-    // Send a real message after 2 seconds
-    setTimeout(() => {
-      console.log("Sending real text message...");
-      sendTextMessage("Test message from debug function");
-    }, 2000);
-    
-  } else {
-    console.error("❌ WebSocket not connected");
-  }
-}
-
-// Make all debug functions available globally
-window.debugConversationHistory = debugConversationHistory;
-window.debugWebSocket = debugWebSocket;
-window.testMessageDisplay = testMessageDisplay;
-window.testFullFlow = testFullFlow;
-window.addMessageToConversation = addMessageToConversation;
-window.sendTextMessage = sendTextMessage;
-window.loadConversationHistory = loadConversationHistory;
-window.debugHistory = function() {
-  console.log("=== HISTORY DEBUG ===");
-  console.log("Current User ID:", currentUserId);
-  console.log("User conversations loaded:", allUserConversations.length);
-  console.log("History loaded flag:", conversationHistoryLoaded);
-  console.log("Sample conversation:", allUserConversations[0]);
-  loadConversationHistory();
-};
-
-// ==================== MAIN FUNCTIONS ====================
-
-function createPermanentVoiceCircle() {
-  if (document.getElementById('voice-circle')) return;
-  const style = document.createElement('style');
-  style.textContent = `
-    #voice-circle{
-      position:fixed;top:50%;left:50%;
-      width:180px;height:180px;border-radius:50%;
-      background:rgba(99,102,241,.20);
-      transform:translate(-50%,-50%) scale(var(--dynamic-scale,1));
-      pointer-events:none;z-index:50;
-      transition:background-color .35s ease;
-    }
-    #voice-circle.active{
-      animation:pulse-circle 2s infinite alternate ease-in-out;
-    }
-    @keyframes pulse-circle{
-      0%{background:rgba(99,102,241,.55)}
-      100%{background:rgba(99,102,241,.20)}
-    }`;
-  document.head.appendChild(style);
-
-  const c = document.createElement('div');
-  c.id='voice-circle';
-  document.body.appendChild(c);
-  console.log("Created permanent voice circle");
-}
-
-function showVoiceCircle() {
-  const c=document.getElementById('voice-circle')||createPermanentVoiceCircle();
-  c.classList.add('active');
-}
-
-function hideVoiceCircle() {
-  const c=document.getElementById('voice-circle');
-  if (c){ c.classList.remove('active'); c.style.setProperty('--dynamic-scale',1); }
-}
-
-function showNotification(msg, type='info'){
-  const n=document.createElement('div');
-  n.className=`fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg z-50
-               ${type==='success'?'bg-green-600':
-                 type==='error'  ?'bg-red-600':'bg-indigo-600'}`;
-  n.textContent=msg;
-  document.body.appendChild(n);
-  setTimeout(()=>{n.classList.add('opacity-0');
-                  setTimeout(()=>n.remove(),500)},3000);
-}
-
-function addMessageToConversation(sender, text, timestamp = null) {
-  const actualTimestamp = timestamp || new Date().toISOString();
-  
-  console.log(`🔄 Adding ${sender} message:`, text.substring(0, 50) + '...');
-  
-  const pane = document.getElementById('conversationHistory');
-  if (!pane) {
-    console.error("❌ Conversation history pane not found!");
-    return;
-  }
-
-  try {
-    const box = document.createElement('div');
-    box.className = `p-3 mb-3 rounded-lg text-sm message-enter ${
-      sender === 'user' ? 'bg-gray-800 ml-2' : 'bg-indigo-900 mr-2'
-    }`;
-    
-    const time = new Date(actualTimestamp).toLocaleTimeString();
-    const escapedText = escapeHtml(text).replace(/\n/g, '<br>');
-
-    box.innerHTML = `
-      <div class="flex items-start mb-2">
-        <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold
-             ${sender === 'user' ? 'bg-gray-300 text-gray-800' : 'bg-indigo-500 text-white'}">
-          ${sender === 'user' ? 'U' : 'AI'}
-        </div>
-        <span class="text-xs text-gray-400 ml-2">${time}</span>
-      </div>
-      <div class="text-white mt-1 text-sm">${escapedText}</div>
-    `;
-
-    pane.appendChild(box);
-    
-    // Scroll to bottom
-    pane.scrollTop = pane.scrollHeight;
-    
-    console.log(`✅ Added ${sender} message. Total messages: ${pane.children.length}`);
-    
-  } catch (error) {
-    console.error("❌ Error adding message to conversation:", error);
-  }
-}
-
-function escapeHtml(text) {
-  if (!text) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
+// --- WebSocket Connection ---
 function connectWebSocket() {
-  if (reconnecting && reconnectAttempts >= maxReconnectAttempts) {
-    console.error("Maximum reconnect attempts reached. Please refresh the page.");
-    showNotification("Connection lost. Please refresh the page.", "error");
-    return;
-  }
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws?session_id=${SESSION_ID}`;
+    console.log("🔌 Connecting to WebSocket:", wsUrl);
 
-  if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
-    try {
-      ws.close();
-    } catch (e) {
-      console.warn("Error closing existing WebSocket:", e);
-    }
-  }
+    ws = new WebSocket(wsUrl);
 
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws?session_id=${SESSION_ID}`);
-  window.ws = ws;
+    ws.onopen = (event) => {
+        console.log("✅ WebSocket connected to:", wsUrl);
+        const connLbl = document.getElementById('connectionStatus');
+        if (connLbl) {
+            connLbl.textContent = 'Connected';
+            connLbl.className = 'text-green-400';
+        }
+        reconnectAttempts = 0; // Reset attempts on successful connect
+        reconnecting = false;
+    };
 
-  const connLbl = document.getElementById('connectionStatus');
-  if (connLbl) {
-    connLbl.textContent = reconnecting ? 'Reconnecting…' : 'Connecting…';
-    connLbl.className = 'text-yellow-500';
-  }
+    ws.onclose = (event) => {
+        console.log("🔌 WebSocket disconnected. Code:", event.code, "Reason:", event.reason);
+        const connLbl = document.getElementById('connectionStatus');
+        if (connLbl) {
+            connLbl.textContent = 'Disconnected';
+            connLbl.className = 'text-red-500';
+        }
+        clearAudioPlayback(); // Stop any audio on disconnect
+        // Attempt to reconnect if not a clean close (1000) or going away (1001)
+        if (event.code !== 1000 && event.code !== 1001) {
+            if (!reconnecting && reconnectAttempts < maxReconnectAttempts) {
+                reconnecting = true;
+                reconnectAttempts++;
+                const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000); // Max 10 seconds
+                console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                setTimeout(connectWebSocket, delay);
+            } else if (reconnectAttempts >= maxReconnectAttempts) {
+                console.error("❌ Max reconnection attempts reached. Giving up.");
+                showNotification("Could not reconnect to server. Please refresh the page.", "error");
+            }
+        }
+    };
 
-  ws.onopen = () => {
-    console.log("✅ WebSocket connected successfully");
-    if (connLbl) {
-      connLbl.textContent = 'Connected';
-      connLbl.className = 'text-green-500';
-    }
-    
-    reconnecting = false;
-    reconnectAttempts = 0;
-    
-    if (!reconnecting) {
-      addMessageToConversation('ai', 'WebSocket connected. Ready for voice or text.');
-    } else {
-      showNotification("Reconnected successfully", "success");
-    }
-  };
+    ws.onerror = (error) => {
+        console.error("❌ WebSocket error:", error);
+        const connLbl = document.getElementById('connectionStatus');
+        if (connLbl) {
+            connLbl.textContent = 'Error';
+            connLbl.className = 'text-red-500';
+        }
+    };
 
-  ws.onclose = (event) => {
-    console.log("❌ WebSocket closed with code:", event.code, "reason:", event.reason);
-    if (connLbl) {
-      connLbl.textContent = 'Disconnected';
-      connLbl.className = 'text-red-500';
-    }
+    ws.onmessage = (e) => {
+        console.log("📨 RAW WebSocket message received:", e.data);
+        try {
+            const data = JSON.parse(e.data);
+            console.log("📦 Parsed message:", data);
 
-    clearAudioPlayback();
-    
-    if (event.code !== 1000 && event.code !== 1001) {
-      reconnecting = true;
-      reconnectAttempts++;
-      
-      const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 1000);
-      console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
-      
-      setTimeout(connectWebSocket, delay);
-    }
-  };
-
-  ws.onerror = (error) => {
-    console.error("❌ WebSocket error:", error);
-    if (connLbl) {
-      connLbl.textContent = 'Error';
-      connLbl.className = 'text-red-500';
-    }
-  };
-
-  ws.onmessage = (e) => {
-    console.log("📨 RAW WebSocket message received:", e.data);
-    try {
-      const data = JSON.parse(e.data);
-      console.log("📨 Parsed WebSocket message type:", data.type, "data:", data);
-      handleWebSocketMessage(data);
-    } catch (err) {
-      console.error("❌ Error parsing WebSocket message:", err, "Raw data:", e.data);
-    }
-  };
+            switch (data.type) {
+                case 'text':
+                    console.log("📝 Processing user text message...");
+                    addMessageToConversation('user', data.text);
+                    showVoiceCircle();
+                    break;
+                case 'transcription':
+                    console.log("🎤 Processing transcription...");
+                    addMessageToConversation('user', data.text);
+                    showVoiceCircle();
+                    break;
+                case 'response':
+                    console.log("🤖 Processing AI response...");
+                    addMessageToConversation('ai', data.text);
+                    showVoiceCircle();
+                    // Refresh history when new response is received
+                    setTimeout(() => loadConversationHistory(), 1000); // Delay to allow DB write
+                    break;
+                case 'audio_chunk':
+                    console.log("🔊 Audio chunk received - genId:", data.gen_id, "activeGenId:", activeGenId);
+                    if (activeGenId === 0 && data.gen_id) {
+                        activeGenId = data.gen_id;
+                        console.log("🎯 Setting active generation ID to:", activeGenId);
+                    }
+                    if (data.gen_id === activeGenId) {
+                        console.log("🎵 Queueing audio chunk for ID:", data.gen_id);
+                        queueAudioChunk(data.audio_data);
+                    } else {
+                        console.log("⏭️ Received chunk for different generation ID, ignoring.");
+                    }
+                    break;
+                case 'audio_generation_status':
+                    console.log("🎵 Audio generation status:", data.status);
+                    if (data.status === 'generating') {
+                        console.log("🔄 New audio generation starting");
+                        interruptRequested = false;
+                        interruptInProgress = false;
+                        if (data.gen_id) {
+                            activeGenId = data.gen_id;
+                            console.log("🎯 Active generation set to:", activeGenId);
+                        }
+                        showVoiceCircle();
+                    } else if (data.status === 'first_chunk') {
+                        console.log("🎵 First audio chunk ready");
+                        showVoiceCircle();
+                    } else if (data.status === 'complete') {
+                        console.log("✅ Audio generation complete");
+                        activeGenId = 0; // Reset active ID only after complete
+                        if (!isAudioCurrentlyPlaying) {
+                            hideVoiceCircle();
+                        }
+                    } else if (data.status === 'interrupted' || data.status === 'interrupt_acknowledged') {
+                        console.log("⏹️ Audio interrupted by server");
+                        clearAudioPlayback();
+                    }
+                    break;
+                case 'status':
+                    console.log("ℹ️ Status:", data.message);
+                    if (data.message === 'Thinking...') {
+                        showVoiceCircle();
+                    }
+                    break;
+                case 'error':
+                    console.error("❌ Error:", data.message);
+                    showNotification(data.message, 'error');
+                    hideVoiceCircle();
+                    break;
+                case 'vad_status':
+                    console.log("🎤 VAD Status:", data.status);
+                    if (data.status === 'speech_started') {
+                        showVoiceCircle();
+                    }
+                    break;
+                case 'test_response':
+                    console.log("✅ Test response received:", data.message);
+                    showNotification(data.message, 'success');
+                    break;
+                default:
+                    console.log("❓ Unknown message type:", data.type);
+            }
+        } catch (error) {
+            console.error("❌ Error parsing WebSocket message:", error, "Raw:", e.data);
+        }
+    };
 }
 
-function sendTextMessage(txt) {
-  if (!txt.trim()) {
-    console.log("Empty message, ignoring");
-    return;
-  }
-  
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    showNotification("Not connected", "error");
-    return;
-  }
+// --- Message Handling ---
+function addMessageToConversation(sender, text, timestamp = new Date().toLocaleTimeString()) {
+    console.log(`💬 Adding ${sender} message:`, text.substring(0, 50) + (text.length > 50 ? '...' : ''));
+    const pane = document.getElementById('conversationHistory');
+    if (!pane) {
+        console.error("❌ Conversation history pane not found! Check if element exists in HTML.");
+        // Try to find the element with different selectors
+        const alternativeSelectors = ['#conversationHistory', '.conversation-container div', '[id*="conversation"]', '[class*="conversation"]'];
+        for (const selector of alternativeSelectors) {
+            const element = document.querySelector(selector);
+            if (element) {
+                console.log(`Found conversation pane with selector: ${selector}`);
+                // Retry adding the message to the found element
+                addMessageToConversation(sender, text, timestamp);
+                return; // Exit after retrying
+            }
+        }
+        console.error("❌ Could not find conversation history pane with common selectors.");
+        return; // Stop if pane is still not found
+    }
 
-  console.log("=== SENDING TEXT MESSAGE ===");
-  console.log("Message:", txt);
-  console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
+    // Escape HTML to prevent injection
+    const escapeHtml = (unsafe) => {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "<")
+            .replace(/>/g, ">")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    };
+    const escapedText = escapeHtml(text);
 
-  // Create the message payload
-  const messageData = {
-    type: 'text_message',
-    text: txt,
-    session_id: SESSION_ID,
-    timestamp: new Date().toISOString()
-  };
-  
-  console.log("Sending message data:", messageData);
-  
-  try {
-    // Add user message to UI immediately - FORCE DISPLAY
-    console.log("🔄 Adding user message to conversation...");
-    addMessageToConversation('user', txt);
-    
-    // Double-check that the message was added
+    const box = document.createElement('div');
+    box.className = 'mb-4 p-4 bg-gray-800 rounded-lg shadow'; // Consistent styling
+    box.innerHTML = `
+        <div class="flex items-center">
+            <div class="w-6 h-6 rounded-full flex items-center justify-center ${sender === 'user' ? 'bg-gray-300 text-gray-800' : 'bg-indigo-500 text-white'}">
+                ${sender === 'user' ? 'U' : 'AI'}
+            </div>
+            <span class="text-xs text-gray-400 ml-2">${timestamp}</span>
+        </div>
+        <div class="text-white mt-1 text-sm">${escapedText}</div>
+    `;
+    console.log("✅ Message element created, appending to pane...");
+    pane.appendChild(box);
+
+    // Force multiple scroll methods to ensure visibility
+    pane.scrollTop = pane.scrollHeight;
     setTimeout(() => {
-      const pane = document.getElementById('conversationHistory');
-      if (pane) {
-        console.log("✅ User message should be visible. Total messages in pane:", pane.children.length);
-        // Force scroll to make sure it's visible
         pane.scrollTop = pane.scrollHeight;
-      }
-    }, 100);
-    
+    }, 50);
+
+    console.log("✅ User message should be visible. Total messages in pane:", pane.children.length);
+
     // Update message count
     const cnt = document.getElementById('messageCount');
     if (cnt) {
-      messageCount++;
-      cnt.textContent = messageCount;
-      console.log("✅ Message count updated to:", messageCount);
+        messageCount++;
+        cnt.textContent = messageCount;
+        console.log("✅ Message count updated to:", messageCount);
     }
-    
+
     // Clear input
     const textInput = document.getElementById('textInput');
     if (textInput) {
-      textInput.value = '';
-      console.log("✅ Input cleared");
+        textInput.value = '';
+        console.log("✅ Input cleared");
     }
-    
+
     // Show thinking indicator
     showVoiceCircle();
-    
-    // Send message to server
-    ws.send(JSON.stringify(messageData));
-    
-    console.log("✅ Text message sent successfully");
-    
-  } catch (error) {
-    console.error("❌ Error sending message:", error);
-    showNotification("Error sending message", "error");
-  }
+}
+
+// --- Audio Handling ---
+function queueAudioChunk(base64AudioData) {
+    audioPlaybackQueue.push(base64AudioData);
+    console.log("🎵 Queued audio chunk. Queue length:", audioPlaybackQueue.length);
+    if (!isAudioCurrentlyPlaying) {
+        processAudioQueue();
+    }
+}
+
+async function processAudioQueue() {
+    if (audioPlaybackQueue.length === 0) {
+        console.log("🔚 Audio queue is empty, stopping playback loop.");
+        isAudioCurrentlyPlaying = false;
+        // Potentially hide the voice circle here if no more audio is expected for this generation
+        // if (activeGenId === 0) { hideVoiceCircle(); } // Or check if generation is complete via status message
+        return;
+    }
+
+    if (interruptRequested || interruptInProgress) {
+        console.log("🛑 Interrupt requested, clearing queue and stopping playback.");
+        audioPlaybackQueue = []; // Clear the queue
+        return; // Exit without playing anything further
+    }
+
+    isAudioCurrentlyPlaying = true;
+    const audioData = audioPlaybackQueue.shift(); // Get the next chunk
+
+    try {
+        // Decode base64 to binary
+        const binaryString = atob(audioData);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        // Create audio buffer
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            window.audioContext = audioContext;
+        }
+        const audioBuffer = await audioContext.decodeAudioData(bytes.buffer);
+
+        // Create source and connect to destination
+        currentAudioSource = audioContext.createBufferSource();
+        currentAudioSource.buffer = audioBuffer;
+        currentAudioSource.connect(audioContext.destination);
+
+        // Play the audio
+        console.log("▶️ Playing audio chunk...");
+        currentAudioSource.start();
+
+        // Set up end event to process next chunk
+        currentAudioSource.onended = () => {
+            console.log("⏹️ Audio chunk finished playing.");
+            currentAudioSource = null; // Clear reference after playback
+            processAudioQueue(); // Process the next chunk in the queue
+        };
+
+    } catch (error) {
+        console.error("❌ Error processing audio chunk:", error);
+        // Continue with the next chunk even if one fails
+        processAudioQueue();
+    }
 }
 
 function clearAudioPlayback() {
-  console.log("FORCEFULLY CLEARING AUDIO PLAYBACK");
-  
-  interruptRequested = true;
-  interruptInProgress = true;
-  
-  try {
-    console.log(`Clearing queue with ${audioPlaybackQueue.length} items`);
-    audioPlaybackQueue = [];
-    
-    activeGenId = 0;
-    
-    if (currentAudioSource) {
-      console.log("Stopping active audio source");
-      
-      try {
-        if (currentAudioSource.disconnect) {
-          currentAudioSource.disconnect();
-        }
-      } catch (e) {
-        console.warn("Error disconnecting audio source:", e);
-      }
-      
-      try {
-        if (currentAudioSource.stop) {
-          currentAudioSource.stop(0);
-        }
-      } catch (e) {
-        console.warn("Error stopping audio source:", e);
-      }
-      
-      currentAudioSource = null;
-    }
-    
+    console.log("🧹 Clearing audio playback...");
+    interruptRequested = false; // Reset interrupt flag when clearing
+    interruptInProgress = true; // Set in-progress flag to prevent new plays
+
+    // Stop the current audio source
     try {
-      if (audioContext) {
-        const oldContext = audioContext;
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        window.audioContext = audioContext;
-        
-        try {
-          oldContext.close();
-        } catch (closeError) {
-          console.warn("Error closing old audio context:", closeError);
+        if (currentAudioSource) {
+            if (currentAudioSource.stop) {
+                currentAudioSource.stop(0); // Stop immediately
+            }
+            currentAudioSource.disconnect(); // Disconnect from context
         }
-      } else {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        window.audioContext = audioContext;
-      }
-    } catch (contextError) {
-      console.error("Error recreating audio context:", contextError);
+    } catch (e) {
+        console.warn("Error disconnecting/stopping audio source:", e);
     }
-  } catch (err) {
-    console.error("Error clearing audio:", err);
-  }
-  
-  isAudioCurrentlyPlaying = false;
-  hideVoiceCircle();
-  
-  console.log("Audio playback cleared successfully");
-  
-  setTimeout(() => {
-    interruptInProgress = false;
-  }, 300);
+    currentAudioSource = null; // Clear the reference
+
+    // Recreate the audio context to ensure complete stop (handles overlapping plays)
+    try {
+        if (audioContext) {
+            const oldContext = audioContext;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            window.audioContext = audioContext; // Update global reference
+            try {
+                oldContext.close(); // Close the old context to free resources
+            } catch (closeError) {
+                console.warn("Error closing old audio context:", closeError);
+            }
+        } else {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            window.audioContext = audioContext;
+        }
+    } catch (contextError) {
+        console.error("Error recreating audio context:", contextError);
+    }
+
+    // Clear the playback queue
+    audioPlaybackQueue = [];
+    isAudioCurrentlyPlaying = false;
+    hideVoiceCircle();
+    console.log("Audio playback cleared successfully");
+
+    // Reset the in-progress flag after a short delay to allow for cleanup
+    setTimeout(() => {
+        interruptInProgress = false;
+    }, 300);
 }
 
 function requestInterrupt() {
-  console.log("User requested interruption");
-  
-  if (interruptInProgress) {
-    console.log("Interrupt already in progress - force clearing again");
-    clearAudioPlayback();
-    return false;
-  }
-  
-  interruptRequested = true;
-  interruptInProgress = true;
-  
-  showNotification("Interrupting...", "info");
-  
-  clearAudioPlayback();
-  
-  const interruptBtn = document.getElementById('interruptBtn');
-  if (interruptBtn) {
-    interruptBtn.classList.add('bg-red-800');
-    setTimeout(() => {
-      interruptBtn.classList.remove('bg-red-800');
-    }, 300);
-  }
-  
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    console.log("Sending interrupt request to server");
-    try {
-      ws.send(JSON.stringify({
-        type: 'interrupt',
-        immediate: true
-      }));
-    } catch (error) {
-      console.error("Error sending interrupt request:", error);
-    }
-    
-    setTimeout(() => {
-      if (interruptInProgress) {
-        console.log("No interrupt confirmation received from server, resetting state");
-        interruptInProgress = false;
-      }
-    }, 2000);
-    
-    return true;
-  } else {
-    console.warn("WebSocket not available for interrupt request");
-    setTimeout(() => {
-      interruptInProgress = false;
-    }, 500);
-    return false;
-  }
-}
-
-function handleWebSocketMessage(d) {
-  console.log("📨 Received WebSocket message:", d.type, d);
-  
-  switch(d.type) {
-    case 'transcription':
-      console.log("🎤 Processing transcription...");
-      addMessageToConversation('user', d.text);
-      showVoiceCircle();
-      break;
-      
-    case 'response':
-      console.log("🤖 Processing AI response...");
-      addMessageToConversation('ai', d.text);
-      showVoiceCircle();
-      // Refresh user history when new response is received
-      setTimeout(() => {
-        console.log("🔄 Auto-refreshing user history after new conversation");
-        loadConversationHistory();
-      }, 1500);
-      break;
-      
-    case 'audio_chunk':
-      console.log("🔊 Audio chunk received - genId:", d.gen_id, "activeGenId:", activeGenId);
-      
-      if (activeGenId === 0 && d.gen_id) {
-        activeGenId = d.gen_id;
-        console.log("🎯 Setting active generation ID to:", activeGenId);
-      }
-      
-      if (activeGenId === 0 || d.gen_id === activeGenId) {
-        queueAudioForPlayback(d.audio, d.sample_rate, d.gen_id || 0);
-        showVoiceCircle();
-      } else {
-        console.log("🚫 Ignoring audio chunk - generation ID mismatch");
-      }
-      break;
-      
-    case 'audio_status':
-      console.log("🔊 Audio status:", d.status, "genId:", d.gen_id);
-      
-      if (d.status === 'generating') {
-        console.log("🔄 New audio generation starting");
-        interruptRequested = false;
-        interruptInProgress = false;
-        
-        if (d.gen_id) {
-          activeGenId = d.gen_id;
-          console.log("🎯 Active generation set to:", activeGenId);
-        }
-        
-        showVoiceCircle();
-      } 
-      else if (d.status === 'first_chunk') {
-        console.log("🎵 First audio chunk ready");
-        showVoiceCircle();
-      }
-      else if (d.status === 'complete') {
-        console.log("✅ Audio generation complete");
-        activeGenId = 0;
-        if (!isAudioCurrentlyPlaying) {
-          hideVoiceCircle();
-        }
-        // Refresh user history when audio completes
-        setTimeout(() => {
-          console.log("🔄 Auto-refreshing user history after audio complete");
-          loadConversationHistory();
-        }, 1000);
-      } 
-      else if (d.status === 'interrupted' || d.status === 'interrupt_acknowledged') {
-        console.log("⏹️ Audio interrupted by server");
+    console.log("User requested interruption");
+    if (interruptInProgress) {
+        console.log("Interrupt already in progress - force clearing again");
         clearAudioPlayback();
-      }
-      break;
-      
-    case 'status':
-      console.log("ℹ️ Status:", d.message);
-      if (d.message === 'Thinking...') {
-        showVoiceCircle();
-      }
-      break;
-      
-    case 'error':
-      console.error("❌ Error:", d.message);
-      showNotification(d.message, 'error');
-      hideVoiceCircle();
-      break;
-      
-    case 'vad_status':
-      console.log("🎤 VAD Status:", d.status);
-      if (d.status === 'speech_started') {
-        showVoiceCircle();
-      }
-      break;
-
-    case 'test_response':
-      console.log("✅ Test response received:", d.message);
-      showNotification(d.message, 'success');
-      break;
-      
-    default:
-      console.log("❓ Unknown message type:", d.type);
-  }
-}
-
-function queueAudioForPlayback(arr, sr, genId = 0) {
-  console.log("🎵 Queueing audio chunk - genId:", genId, "queue length:", audioPlaybackQueue.length);
-  
-  if (interruptRequested || interruptInProgress) {
-    console.log("🚫 Interrupt active - skipping audio chunk");
-    return;
-  }
-  
-  if (activeGenId === 0 && genId !== 0) {
-    activeGenId = genId;
-    console.log("🎯 First chunk - setting activeGenId to:", activeGenId);
-  }
-  
-  if (activeGenId === 0 || genId === activeGenId) {
-    audioPlaybackQueue.push({arr, sr, genId});
-    
-    if (!isAudioCurrentlyPlaying) {
-      console.log("▶️ Starting audio playback from queue");
-      processAudioPlaybackQueue();
+        return false; // Prevent multiple interrupt requests while processing
     }
-  } else {
-    console.log("🚫 Generation mismatch - ignoring chunk");
-  }
-}
+    interruptRequested = true;
+    interruptInProgress = true;
+    showNotification("Interrupting...", "info");
 
-function processAudioPlaybackQueue() {
-  if (!isAudioCurrentlyPlaying && audioPlaybackQueue.length > 0) {
-    console.log("Starting first audio chunk - force clearing interrupt flags");
-    interruptRequested = false;
-    interruptInProgress = false;
-  }
-  
-  if (interruptRequested || interruptInProgress) {
-    console.log("Interrupt active - not processing audio queue");
-    isAudioCurrentlyPlaying = false;
-    hideVoiceCircle();
-    return;
-  }
-  
-  if (!audioPlaybackQueue.length) {
-    console.log("📭 Audio queue empty, stopping playback");
-    isAudioCurrentlyPlaying = false;
-    hideVoiceCircle();
-    currentAudioSource = null;
-    return;
-  }
-  
-  const interruptBtn = document.getElementById('interruptBtn');
-  if (interruptBtn) {
-    interruptBtn.disabled = false;
-    interruptBtn.classList.remove('opacity-50');
-  }
-  
-  console.log("Processing next audio chunk");
-  isAudioCurrentlyPlaying = true;
-  
-  const {arr, sr, genId} = audioPlaybackQueue.shift();
-  
-  if (activeGenId !== 0 && genId !== activeGenId) {
-    console.log(`Skipping stale chunk playback (gen ${genId} vs active ${activeGenId})`);
-    processAudioPlaybackQueue();
-    return;
-  }
-  
-  playAudioChunk(arr, sr)
-    .then(() => {
-      if (!interruptRequested && !interruptInProgress) {
-        processAudioPlaybackQueue();
-      } else {
-        console.log("interrupt active - stopping queue processing");
-        isAudioCurrentlyPlaying = false;
-        hideVoiceCircle();
-      }
-    })
-    .catch(err => {
-      console.error("Error in audio playback:", err);
-      isAudioCurrentlyPlaying = false;
-      hideVoiceCircle();
-      
-      setTimeout(() => {
-        if (audioPlaybackQueue.length > 0 && !interruptRequested) {
-          processAudioPlaybackQueue();
-        }
-      }, 200);
-    });
-}
-
-async function playAudioChunk(audioArr, sampleRate) {
-  if (interruptRequested || interruptInProgress) {
-    console.log("🚫 Interrupt active - skipping playback");
-    return Promise.resolve();
-  }
-  
-  try {
-    if (!audioContext) {
-      console.log("🎵 Creating new audio context");
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      window.audioContext = audioContext;
-    }
-    
-    if (audioContext.state === 'suspended') {
-      console.log("🎵 Resuming suspended audio context");
-      await audioContext.resume();
-    }
-    
-    console.log("🎵 Playing audio chunk, length:", audioArr.length);
-    
-    const buf = audioContext.createBuffer(1, audioArr.length, sampleRate);
-    buf.copyToChannel(new Float32Array(audioArr), 0);
-    
-    const src = audioContext.createBufferSource();
-    src.buffer = buf;
-    
-    currentAudioSource = src;
-    
-    const an = audioContext.createAnalyser(); 
-    an.fftSize = 256;
-    src.connect(an); 
-    an.connect(audioContext.destination); 
-    
-    console.log("🎵 Starting audio playback");
-    src.start();
-    
-    const arr = new Uint8Array(an.frequencyBinCount);
-    const circle = document.getElementById('voice-circle');
-    
-    function pump() {
-      if (src !== currentAudioSource || interruptRequested || interruptInProgress) {
-        return;
-      }
-      
-      try {
-        an.getByteFrequencyData(arr);
-        const avg = arr.reduce((a,b) => a+b, 0) / arr.length;
-        if (circle) {
-          circle.style.setProperty('--dynamic-scale', (1+avg/255*1.5).toFixed(3));
-        }
-      } catch (e) {
-        console.warn("Animation error:", e);
-        return;
-      }
-      
-      if (src.playbackState !== src.FINISHED_STATE) {
-        requestAnimationFrame(pump);
-      }
-    }
-    pump();
-    
-    return new Promise(resolve => {
-      src.onended = () => {
-        console.log("🎵 Audio chunk finished playing");
-        if (src === currentAudioSource) {
-          currentAudioSource = null;
-        }
-        resolve();
-      };
-    });
-    
-  } catch (error) {
-    console.error("❌ Error playing audio chunk:", error);
-    return Promise.resolve();
-  }
-}
-
-async function startRecording() {
-  if (isRecording) return;
-  try {
-    const constraints = {
-      audio: selectedMicId ? {deviceId:{exact:selectedMicId}} : true
-    };
-    micStream = await navigator.mediaDevices.getUserMedia(constraints);
-
-    if (!audioContext) audioContext = new (AudioContext||webkitAudioContext)();
-    const src = audioContext.createMediaStreamSource(micStream);
-    const proc = audioContext.createScriptProcessor(4096,1,1);
-    src.connect(proc); proc.connect(audioContext.destination);
-
-    proc.onaudioprocess = e => {
-      const samples = Array.from(e.inputBuffer.getChannelData(0));
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(JSON.stringify({
-            type:'audio',
-            audio:samples,
-            sample_rate:audioContext.sampleRate,
-            session_id:SESSION_ID
-          }));
-        } catch (error) {
-          console.error("Error sending audio data:", error);
-          stopRecording();
-        }
-      }
-    };
-
-    window._micProcessor = proc;        
-    isRecording = true;
-    document.getElementById('micStatus').textContent = 'Listening…';
-    showVoiceCircle();
-  } catch (err) {
-    console.error("Microphone access error:", err);
-    showNotification('Microphone access denied','error');
-  }
-}
-
-function stopRecording() {
-  if (!isRecording) return;
-  try {
-    if (window._micProcessor) {
-      window._micProcessor.disconnect();
-      window._micProcessor = null;
-    }
-    if (micStream) {
-      micStream.getTracks().forEach(t => t.stop());
-      micStream = null;
-    }
-  } catch (e) {
-    console.warn("Error stopping recording:", e);
-  }
-  isRecording = false;
-  
-  const micStatus = document.getElementById('micStatus');
-  if (micStatus) {
-    micStatus.textContent = 'Click to speak';
-  }
-  hideVoiceCircle();
-}
-
-async function setupChatUI() {
-  console.log("🚀 Setting up chat UI with user-specific history...");
-  
-  document.documentElement.classList.add('bg-gray-950');
-  document.documentElement.style.backgroundColor = '#030712';
-
-  createPermanentVoiceCircle();
-  connectWebSocket();
-
-  // Load user info first (which will trigger user-specific history load)
-  await loadUserInfo();
-  
-  // Also load system status
-  await checkSystemStatus();
-
-  // Set up periodic refreshes
-  setInterval(() => {
-    if (currentUserId && !conversationHistoryLoaded) {
-      console.log("🔄 Periodic user history refresh...");
-      loadConversationHistory();
-    }
-  }, 30000); // Refresh every 30 seconds
-
-  setInterval(checkSystemStatus, 15000); // Status check every 15 seconds
-
-  initAudioLevelsChart();
-  setupUIEventListeners();
-
-  // Add refresh button handler
-  const refreshHistoryBtn = document.getElementById('refreshHistoryBtn');
-  if (refreshHistoryBtn) {
-    refreshHistoryBtn.addEventListener('click', () => {
-      console.log("🔄 Manual user history refresh requested");
-      loadConversationHistory();
-      showNotification('Refreshing your conversations...', 'info');
-      
-      // Button feedback
-      refreshHistoryBtn.classList.add('rotate-180', 'transition-transform');
-      setTimeout(() => {
-        refreshHistoryBtn.classList.remove('rotate-180');
-      }, 500);
-    });
-  }
-
-  console.log("✅ Chat UI ready with user-specific history integration");
-}
-
-function setupUIEventListeners() {
-  const txt = document.getElementById('textInput');
-  const btn = document.getElementById('sendTextBtn');
-  
-  // Setup enhanced interrupt button
-  const interruptBtn = document.createElement('button');
-  interruptBtn.id = 'interruptBtn';
-  interruptBtn.className = 'px-3 py-2 ml-2 bg-red-600 text-white rounded hover:bg-red-700 flex items-center transition duration-150';
-  interruptBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" /></svg> Stop';
-  interruptBtn.onclick = (e) => {
-    e.preventDefault();
-    try {
-      requestInterrupt();
-      interruptBtn.classList.add('bg-red-800', 'scale-95');
-      setTimeout(() => interruptBtn.classList.remove('bg-red-800', 'scale-95'), 150);
-    } catch (error) {
-      console.error("Error in interrupt button handler:", error);
-    }
-  };
-  interruptBtn.title = "Stop AI speech (Space or Esc)";
-  interruptBtn.disabled = true;
-  interruptBtn.classList.add('opacity-50', 'cursor-not-allowed');
-  
-  if (btn && btn.parentElement) {
-    btn.parentElement.appendChild(interruptBtn);
-  }
-  
-  // Add debug button
-  const debugBtn = document.createElement('button');
-  debugBtn.innerText = "Debug APIs";
-  debugBtn.className = "px-3 py-2 ml-2 bg-blue-600 text-white rounded text-xs";
-  debugBtn.onclick = function() {
-    console.log("=== DEBUG INFO ===");
-    console.log("Current User ID:", currentUserId);
-    console.log("User conversations:", allUserConversations.length);
-    console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
-    loadConversationHistory();
-  };
-  
-  if (btn && btn.parentElement) {
-    btn.parentElement.appendChild(debugBtn);
-  }
-  
-  // Run the update function periodically
-  setInterval(() => {
+    // Update button visual state
     const interruptBtn = document.getElementById('interruptBtn');
     if (interruptBtn) {
-      if (isAudioCurrentlyPlaying && !interruptRequested && !interruptInProgress) {
-        interruptBtn.disabled = false;
-        interruptBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-      } else {
-        interruptBtn.disabled = true;
-        interruptBtn.classList.add('opacity-50', 'cursor-not-allowed');
-      }
-    }
-  }, 300);
-  
-  // Text input handlers
-  if (btn) {
-    btn.onclick = () => {
-      try {
-        sendTextMessage(txt.value);
-      } catch (error) {
-        console.error("Error in send button handler:", error);
-      }
-    };
-  }
-  
-  if (txt) {
-    txt.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        try {
-          sendTextMessage(txt.value);
-        } catch (error) {
-          console.error("Error in text input handler:", error);
-        }
-      }
-    });
-  }
-  
-  // Mic button handler
-  const micBtn = document.getElementById('micToggleBtn');
-  if (micBtn) {
-    micBtn.addEventListener('click', () => {
-      try {
-        if (isRecording) stopRecording();
-        else startRecording();
-      } catch (error) {
-        console.error("Error in mic button handler:", error);
-      }
-    });
-  }
-  
-  // Keyboard interrupt handler
-  document.addEventListener('keydown', e => {
-    if ((e.code === 'Space' || e.code === 'Escape') && isAudioCurrentlyPlaying) {
-      e.preventDefault();
-      try {
-        requestInterrupt();
-        
-        const interruptBtn = document.getElementById('interruptBtn');
-        if (interruptBtn) {
-          interruptBtn.classList.add('bg-red-800');
-          setTimeout(() => {
+        interruptBtn.classList.add('bg-red-800');
+        setTimeout(() => {
             interruptBtn.classList.remove('bg-red-800');
-          }, 200);
-        }
-      } catch (error) {
-        console.error("Error in keyboard interrupt handler:", error);
-      }
+        }, 300);
     }
-  });
-  
-  // Initialize audio context
-  if (!audioContext) {
-    try {
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      window.audioContext = audioContext;
-    } catch (error) {
-      console.error("Error creating audio context:", error);
-      showNotification("Audio initialization failed. Please refresh the page.", "error");
-    }
-  }
-  
-  // Try to unlock audio context on user interaction
-  ['click', 'touchstart', 'keydown'].forEach(ev =>
-    document.addEventListener(ev, function unlock() {
-      if (audioContext && audioContext.state === 'suspended') {
+
+    // Send interrupt request to the server
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log("Sending interrupt request to server");
         try {
-          audioContext.resume();
+            ws.send(JSON.stringify({
+                type: 'interrupt',
+                immediate: true,
+                session_id: SESSION_ID
+            }));
         } catch (error) {
-          console.warn("Error resuming audio context:", error);
+            console.error("Error sending interrupt request:", error);
         }
-      }
-      document.removeEventListener(ev, unlock);
-    })
-  );
+        // Timeout to ensure client-side cleanup if server doesn't respond quickly
+        setTimeout(() => {
+            if (interruptInProgress) {
+                console.log("Interrupt timeout reached, forcing clear.");
+                clearAudioPlayback();
+            }
+        }, 1000);
+    } else {
+        console.warn("WebSocket not open, clearing audio client-side only.");
+        clearAudioPlayback();
+    }
+    return true;
 }
 
-function initAudioLevelsChart() {
-  const ctx = document.getElementById('audioLevels');
-  if (!ctx) return;
-  
-  try {
-    if (audioLevelsChart) audioLevelsChart.destroy();
-    
-    const grad = ctx.getContext('2d').createLinearGradient(0, 0, 0, 100);
-    grad.addColorStop(0, 'rgba(79,70,229,.6)');
-    grad.addColorStop(1, 'rgba(79,70,229,.1)');
-    
-    audioLevelsChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: Array(30).fill(''),
-        datasets: [{
-          data: Array(30).fill(0),
-          backgroundColor: grad,
-          borderColor: 'rgba(99,102,241,1)',
-          borderWidth: 2,
-          tension: .4,
-          fill: true,
-          pointRadius: 0
-        }]
-      },
-      options: {
-        animation: false,
-        responsive: true,
-        scales: {
-          y: {
-            beginAtZero: true,
-            max: 100,
-            ticks: {display: false},
-            grid: {color: 'rgba(255,255,255,.1)'}
-          },
-          x: {display: false, grid: {display: false}}
-        },
-        plugins: {
-          legend: {display: false},
-          tooltip: {enabled: false}
-        },
-        elements: {point: {radius: 0}}
-      }
+// --- Voice Activity Detection (VAD) and Microphone ---
+let vadProcessor = null;
+let isVADActive = true; // Default to enabled
+let vadThreshold = 0.5; // Default threshold
+let volumeLevel = 1.0; // Default volume multiplier
+
+async function toggleMic() {
+    const micBtn = document.getElementById('micToggleBtn');
+    const micStatus = document.getElementById('micStatus');
+    const audioStatus = document.getElementById('audioStatus');
+
+    if (isRecording) {
+        console.log("⏹️ Stopping microphone...");
+        isRecording = false;
+        if (micBtn) {
+            micBtn.classList.remove('pulse', 'bg-red-600');
+            micBtn.classList.add('bg-indigo-600');
+        }
+        if (micStatus) micStatus.textContent = "Click to speak";
+        if (audioStatus) audioStatus.textContent = "Idle";
+        hideVoiceCircle();
+
+        if (micStream) {
+            micStream.getTracks().forEach(track => track.stop());
+            micStream = null;
+        }
+        if (vadProcessor) {
+            vadProcessor.stop();
+            vadProcessor = null;
+        }
+        // Send an empty audio chunk to signal end of speech to the backend
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            try {
+                ws.send(JSON.stringify({
+                    type: 'audio_chunk',
+                    audio_data: '', // Empty chunk signals end
+                    session_id: SESSION_ID
+                }));
+            } catch (error) {
+                console.error("Error sending end-of-speech signal:", error);
+            }
+        }
+    } else {
+        console.log("🎤 Starting microphone...");
+        isRecording = true;
+        if (micBtn) {
+            micBtn.classList.add('pulse', 'bg-red-600');
+            micBtn.classList.remove('bg-indigo-600');
+        }
+        if (micStatus) micStatus.textContent = "Listening...";
+        if (audioStatus) audioStatus.textContent = "Recording";
+
+        try {
+            const constraints = { audio: { deviceId: selectedMicId ? { exact: selectedMicId } : undefined } };
+            micStream = await navigator.mediaDevices.getUserMedia(constraints);
+            console.log("✅ Microphone access granted.");
+
+            // Initialize VAD processor if available (requires separate VAD library)
+            // This is a simplified simulation using ScriptProcessorNode and basic threshold
+            // For a proper VAD, integrate a library like Silero VAD JS
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(micStream);
+            const processor = audioContext.createScriptProcessor(1024, 1, 1); // Buffer size, input channels, output channels
+
+            let isActive = false;
+            let silenceStart = 0;
+            const silenceThreshold = 2000; // 2 seconds of silence to trigger end
+
+            processor.onaudioprocess = (e) => {
+                const inputData = e.inputBuffer.getChannelData(0);
+                let sum = 0;
+                for (let i = 0; i < inputData.length; i++) {
+                    const sample = Math.abs(inputData[i] * volumeLevel); // Apply volume multiplier
+                    sum += sample * sample;
+                }
+                const rms = Math.sqrt(sum / inputData.length);
+                const isSpeechDetected = rms > vadThreshold;
+
+                // Update audio status based on VAD
+                if (isSpeechDetected && !isActive) {
+                    console.log("🎤 Speech started detected by client-side VAD simulation.");
+                    isActive = true;
+                    if (audioStatus) audioStatus.textContent = "Listening (VAD)";
+                    // Send start signal to backend if needed (usually happens on first chunk)
+                    showVoiceCircle();
+                    // Reset silence timer
+                    silenceStart = Date.now();
+                } else if (!isSpeechDetected && isActive) {
+                    // Check if silence duration exceeds threshold
+                    if (Date.now() - silenceStart > silenceThreshold) {
+                        console.log("🤫 Speech ended detected by client-side VAD simulation after timeout.");
+                        isActive = false;
+                        if (audioStatus) audioStatus.textContent = "Processing...";
+                        // Stop recording automatically
+                        toggleMic();
+                    }
+                } else if (isSpeechDetected && isActive) {
+                    // Reset silence timer if speech is detected again
+                    silenceStart = Date.now();
+                }
+
+                // Send audio data to WebSocket (if connected)
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    // Convert float32 array to Int16 for transmission (or keep as float32 if backend handles it)
+                    const int16Array = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        int16Array[i] = Math.max(-1, Math.min(1, inputData[i] * volumeLevel)) * 0x7FFF;
+                    }
+                    const audioChunk = String.fromCharCode.apply(null, new Uint8Array(int16Array.buffer));
+                    try {
+                        ws.send(JSON.stringify({
+                            type: 'audio_chunk',
+                            audio_data: btoa(audioChunk), // Encode as base64
+                            session_id: SESSION_ID
+                        }));
+                    } catch (sendError) {
+                        console.error("Error sending audio chunk:", sendError);
+                    }
+                }
+            };
+
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+            vadProcessor = processor; // Store reference to stop later
+
+        } catch (err) {
+            console.error("❌ Microphone access denied or failed:", err);
+            showNotification("Microphone access denied. Please allow access in your browser settings.", "error");
+            isRecording = false;
+            if (micBtn) {
+                micBtn.classList.remove('pulse', 'bg-red-600');
+                micBtn.classList.add('bg-indigo-600');
+            }
+            if (micStatus) micStatus.textContent = "Mic denied";
+            if (audioStatus) audioStatus.textContent = "Error";
+        }
+    }
+}
+
+// --- UI Utilities ---
+function showVoiceCircle() {
+    const circle = document.getElementById('voice-circle');
+    if (circle) {
+        circle.classList.add('active');
+        circle.style.display = 'block';
+    }
+}
+
+function hideVoiceCircle() {
+    const circle = document.getElementById('voice-circle');
+    if (circle) {
+        circle.classList.remove('active');
+        // Optional: Hide after animation completes to avoid flickering if show/hide happen quickly
+        // setTimeout(() => { if (!circle.classList.contains('active')) circle.style.display = 'none'; }, 2000);
+    }
+}
+
+function showNotification(message, type = 'info') {
+    // Create or reuse a notification element
+    let notification = document.getElementById('globalNotification');
+    if (!notification) {
+        notification = document.createElement('div');
+        notification.id = 'globalNotification';
+        notification.className = 'fixed top-4 right-4 p-4 rounded-lg shadow-lg text-white z-50 max-w-xs';
+        document.body.appendChild(notification);
+    }
+
+    // Set content and style based on type
+    notification.textContent = message;
+    notification.className = 'fixed top-4 right-4 p-4 rounded-lg shadow-lg text-white z-50 max-w-xs ';
+    switch (type) {
+        case 'success':
+            notification.classList.add('bg-green-600');
+            break;
+        case 'error':
+            notification.classList.add('bg-red-600');
+            break;
+        case 'warning':
+            notification.classList.add('bg-yellow-600', 'text-gray-900');
+            break;
+        default: // 'info'
+            notification.classList.add('bg-blue-600');
+    }
+
+    // Show notification
+    notification.style.display = 'block';
+
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+        notification.style.display = 'none';
+    }, 5000);
+}
+
+// --- Settings Modal ---
+async function initializeSettingsModal() {
+    console.log("🔧 Initializing settings modal...");
+    const micSelect = document.getElementById('micSelect');
+    const outputSelect = document.getElementById('outputSelect');
+    const saveBtn = document.getElementById('saveAudioSettingsBtn');
+    const testMicBtn = document.getElementById('testMicBtn');
+    const testAudioBtn = document.getElementById('testAudioBtn');
+    const vadEnabled = document.getElementById('vadEnabled');
+    const vadThreshold = document.getElementById('vadThreshold');
+    const vadThresholdValue = document.getElementById('vadThresholdValue');
+    const volumeLevelSlider = document.getElementById('volumeLevel');
+    const volumeLevelValue = document.getElementById('volumeLevelValue');
+    const speakerVolumeSlider = document.getElementById('speakerVolume');
+    const speakerVolumeValue = document.getElementById('speakerVolumeValue');
+
+    if (!micSelect || !outputSelect || !saveBtn) {
+        console.error("❌ Settings modal elements not found.");
+        return;
+    }
+
+    // Load saved settings from localStorage or use defaults
+    const savedSettings = JSON.parse(localStorage.getItem('audioSettings') || '{}');
+    if (savedSettings.micId) selectedMicId = savedSettings.micId;
+    if (savedSettings.outputId) selectedOutputId = savedSettings.outputId;
+    if (savedSettings.vadEnabled !== undefined) isVADActive = savedSettings.vadEnabled;
+    if (savedSettings.vadThreshold !== undefined) vadThreshold.value = savedSettings.vadThreshold;
+    if (savedSettings.volumeLevel !== undefined) volumeLevelSlider.value = savedSettings.volumeLevel;
+    if (savedSettings.speakerVolume !== undefined) speakerVolumeSlider.value = savedSettings.speakerVolume;
+
+    // Update UI elements based on loaded settings
+    vadEnabled.checked = isVADActive;
+    vadThresholdValue.textContent = vadThreshold.value;
+    volumeLevelValue.textContent = volumeLevelSlider.value;
+    speakerVolumeValue.textContent = speakerVolumeSlider.value;
+
+    // Populate microphone and output device lists
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(device => device.kind === 'audioinput');
+        const outputs = devices.filter(device => device.kind === 'audiooutput'); // Not directly used for output in this basic setup, but list for selection
+
+        micSelect.innerHTML = '<option value="">Default Microphone</option>';
+        mics.forEach(mic => {
+            const option = document.createElement('option');
+            option.value = mic.deviceId;
+            option.textContent = mic.label || `Microphone ${micSelect.length}`;
+            if (mic.deviceId === selectedMicId) option.selected = true;
+            micSelect.appendChild(option);
+        });
+
+        outputSelect.innerHTML = '<option value="">Default Speaker</option>';
+        outputs.forEach(output => {
+            const option = document.createElement('option');
+            option.value = output.deviceId;
+            option.textContent = output.label || `Speaker ${outputSelect.length}`;
+            if (output.deviceId === selectedOutputId) option.selected = true;
+            outputSelect.appendChild(option);
+        });
+
+    } catch (err) {
+        console.error("❌ Error getting media devices:", err);
+        showNotification("Could not access audio devices. Please check permissions.", "error");
+    }
+
+    // Event Listeners for Sliders
+    if (vadThreshold) {
+        vadThreshold.addEventListener('input', () => {
+            vadThresholdValue.textContent = vadThreshold.value;
+        });
+    }
+    if (volumeLevelSlider) {
+        volumeLevelSlider.addEventListener('input', () => {
+            volumeLevelValue.textContent = volumeLevelSlider.value;
+        });
+    }
+    if (speakerVolumeSlider) {
+        speakerVolumeSlider.addEventListener('input', () => {
+            speakerVolumeValue.textContent = speakerVolumeSlider.value;
+        });
+    }
+
+    // Save Settings
+    saveBtn.addEventListener('click', () => {
+        selectedMicId = micSelect.value || null;
+        selectedOutputId = outputSelect.value || null;
+        isVADActive = vadEnabled.checked;
+        vadThresholdValue = parseFloat(vadThreshold.value);
+        volumeLevel = parseFloat(volumeLevelSlider.value);
+        speakerVolume = parseFloat(speakerVolumeSlider.value); // Store for potential future use
+
+        const settingsToSave = {
+            micId: selectedMicId,
+            outputId: selectedOutputId,
+            vadEnabled: isVADActive,
+            vadThreshold: vadThresholdValue,
+            volumeLevel: volumeLevel,
+            speakerVolume: speakerVolume
+        };
+        localStorage.setItem('audioSettings', JSON.stringify(settingsToSave));
+        configSaved = true;
+        showNotification("Audio settings saved!", "success");
+        document.getElementById('settingsModal').classList.add('hidden');
     });
-  } catch (error) {
-    console.error("Error initializing audio chart:", error);
-  }
+
+    // Test Buttons (Basic Implementation)
+    testMicBtn.addEventListener('click', async () => {
+        console.log("🔍 Testing microphone...");
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: selectedMicId ? { exact: selectedMicId } : undefined } });
+            showNotification("Microphone test successful!", "success");
+            stream.getTracks().forEach(track => track.stop()); // Stop immediately after test
+        } catch (err) {
+            console.error("❌ Microphone test failed:", err);
+            showNotification("Microphone test failed. Check device permissions.", "error");
+        }
+    });
+
+    testAudioBtn.addEventListener('click', () => {
+        console.log("🔍 Testing audio output...");
+        // Basic beep using Web Audio API
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.type = 'sine';
+        oscillator.frequency.value = 440; // A4 note
+        gainNode.gain.value = 0.1; // Low volume
+        oscillator.start();
+        setTimeout(() => {
+            oscillator.stop();
+            showNotification("Audio output test complete.", "info");
+        }, 500);
+    });
 }
 
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', setupChatUI);
-} else {
-  setupChatUI();
+// --- User Info & History Functions ---
+async function loadUserInfo() {
+    try {
+        console.log("👤 Loading user info...");
+        const response = await fetch('/api/user/profile');
+        if (response.ok) {
+            const userData = await response.json();
+            const userEmailElement = document.getElementById('currentUserEmail');
+            if (userEmailElement) {
+                userEmailElement.textContent = userData.email;
+                console.log("✅ User info loaded:", userData.email);
+            }
+        } else {
+            console.error('❌ Failed to load user profile:', response.status);
+            const userEmailElement = document.getElementById('currentUserEmail');
+            if (userEmailElement) {
+                userEmailElement.textContent = 'Not logged in';
+            }
+        }
+    } catch (error) {
+        console.error('❌ Failed to load user info:', error);
+        const userEmailElement = document.getElementById('currentUserEmail');
+        if (userEmailElement) {
+            userEmailElement.textContent = 'Error loading';
+        }
+    }
 }
+
+async function loadConversationHistory() {
+    try {
+        console.log("📚 Loading conversation history...");
+        // Fetch conversations for the *current* user only via the backend endpoint
+        const response = await fetch('/api/user/conversations');
+
+        if (response.ok) {
+            const conversations = await response.json();
+            console.log("✅ Loaded conversations:", conversations.length);
+            displayHistoryList(conversations); // Pass the data to the display function
+        } else {
+            console.error('❌ Failed to load conversation history:', response.status);
+            displayHistoryList([]); // Show empty state if failed
+        }
+    } catch (error) {
+        console.error('❌ Failed to load conversation history:', error);
+        displayHistoryList([]); // Show empty state if error
+    }
+}
+
+function displayHistoryList(conversations) {
+    const historyList = document.getElementById('historyList');
+    if (!historyList) {
+        console.error("❌ historyList element not found");
+        return;
+    }
+
+    if (!conversations || conversations.length === 0) {
+        // Show empty state if no conversations
+        historyList.innerHTML = `<div class="text-gray-400 text-center py-8">
+                                   <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                                   </svg>
+                                   <p>No conversations yet</p>
+                                   <p class="text-xs mt-2">Start chatting to see history here</p>
+                                 </div>`;
+        return;
+    }
+
+    // Sort conversations by timestamp (newest first) - redundant if backend already sorts, but safe
+    conversations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Generate HTML for each conversation item and insert into the list
+    // *** REMOVED .slice(0, 20) TO DISPLAY ALL CONVERSATIONS ***
+    historyList.innerHTML = conversations.map(conv => {
+        // Escape HTML for safety
+        const escapeHtml = (unsafe) => {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "<")
+                .replace(/>/g, ">")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        };
+
+        return `<div class="history-item p-3 rounded-lg cursor-pointer bg-gray-800 hover:bg-gray-700 transition-colors" data-conv-id="${conv.id}">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-xs text-gray-400">${new Date(conv.timestamp).toLocaleDateString()}</span>
+                        <span class="text-xs text-indigo-400">${new Date(conv.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div class="text-sm font-medium truncate mb-1" title="${escapeHtml(conv.user_message)}">
+                        ${escapeHtml(conv.user_message.substring(0, 50))}${conv.user_message.length > 50 ? '...' : ''}
+                    </div>
+                    <div class="text-xs text-gray-400 truncate" title="${escapeHtml(conv.ai_message)}">
+                        ${escapeHtml(conv.ai_message.substring(0, 60))}${conv.ai_message.length > 60 ? '...' : ''}
+                    </div>
+                 </div>`;
+    }).join('');
+
+    // Add click handlers to each history item to load that specific conversation
+    historyList.querySelectorAll('.history-item').forEach(item => {
+        item.addEventListener('click', () => {
+            loadConversation(item.dataset.convId);
+        });
+    });
+    console.log("✅ History list updated with", conversations.length, "conversations");
+}
+
+async function loadConversation(conversationId) {
+    try {
+        console.log("📖 Loading conversation:", conversationId);
+        const response = await fetch(`/api/conversations/${conversationId}`);
+        if (response.ok) {
+            const conversation = await response.json();
+            displayConversation(conversation);
+            showNotification('Conversation loaded', 'info');
+        } else {
+            console.error('❌ Failed to load conversation:', response.status);
+            showNotification('Failed to load conversation', 'error');
+        }
+    } catch (error) {
+        console.error('❌ Failed to load conversation:', error);
+        showNotification('Error loading conversation', 'error');
+    }
+}
+
+function displayConversation(conversation) {
+    console.log("🖼️ Displaying conversation:", conversation);
+    const pane = document.getElementById('conversationHistory');
+    if (!pane) {
+        console.error("❌ Conversation pane not found for display.");
+        return;
+    }
+
+    // Clear current conversation display
+    pane.innerHTML = '';
+
+    // Add user message
+    if (conversation.user_message) {
+        addMessageToConversation('user', conversation.user_message, new Date(conversation.timestamp).toLocaleTimeString());
+    }
+    // Add AI message
+    if (conversation.ai_message) {
+        addMessageToConversation('ai', conversation.ai_message, new Date(conversation.timestamp).toLocaleTimeString());
+    }
+
+    // Scroll to bottom
+    pane.scrollTop = pane.scrollHeight;
+}
+
+// --- System Status ---
+async function checkSystemStatus() {
+    try {
+        console.log("🔧 Checking system status...");
+        const response = await fetch('/api/status');
+        if (response.ok) {
+            const status = await response.json();
+            updateModelStatus(status);
+        } else {
+            console.error('❌ Failed to check system status:', response.status);
+            updateModelStatus({ models_loaded: false });
+        }
+    } catch (error) {
+        console.error('❌ Failed to check system status:', error);
+        updateModelStatus({ models_loaded: false });
+    }
+}
+
+function updateModelStatus(status) {
+    const element = document.getElementById('modelStatus');
+    if (!element) {
+        console.error("❌ modelStatus element not found");
+        return;
+    }
+
+    if (status.models_loaded) {
+        const loadedModels = [];
+        if (status.whisper_loaded) loadedModels.push('Speech');
+        if (status.llm_loaded) loadedModels.push('LLM');
+        if (status.rag_loaded) loadedModels.push('RAG');
+        if (loadedModels.length > 0) {
+            element.textContent = loadedModels.join(', ');
+            element.className = 'text-green-400';
+            console.log("✅ Models status updated:", loadedModels.join(', '));
+        } else {
+            element.textContent = 'Models Loading...';
+            element.className = 'text-yellow-400';
+            console.log("⏳ Models still loading...");
+        }
+    } else {
+        element.textContent = 'Checking...';
+        element.className = 'text-yellow-400';
+        console.log("⏳ Models status: Checking...");
+    }
+}
+
+// --- Duration Timer ---
+function startDurationTimer() {
+    sessionStartTime = new Date();
+    console.log("⏱️ Session started at:", sessionStartTime);
+
+    setInterval(() => {
+        if (sessionStartTime) {
+            const now = new Date();
+            const diffMs = now - sessionStartTime;
+            const diffSecs = Math.floor(diffMs / 1000);
+            const hours = Math.floor(diffSecs / 3600);
+            const minutes = Math.floor((diffSecs % 3600) / 60);
+            const seconds = diffSecs % 60;
+
+            const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            const durationElement = document.getElementById('sessionDuration');
+            if (durationElement) {
+                durationElement.textContent = formattedTime;
+            }
+        }
+    }, 1000); // Update every second
+}
+
+// --- Audio Visualization Chart (using Chart.js) ---
+function initializeAudioChart() {
+    const micCanvas = document.getElementById('micCanvas');
+    const outputCanvas = document.getElementById('outputCanvas');
+
+    if (micCanvas) {
+        // This is a placeholder for actual audio level visualization
+        // You would connect this to the audio processing nodes
+        const micCtx = micCanvas.getContext('2d');
+        micCtx.fillStyle = '#4F46E5'; // Indigo
+        micCtx.fillRect(0, micCanvas.height / 2 - 5, micCanvas.width, 10); // Simple bar
+    }
+    if (outputCanvas) {
+        const outCtx = outputCanvas.getContext('2d');
+        outCtx.fillStyle = '#10B981'; // Emerald
+        outCtx.fillRect(0, outputCanvas.height / 2 - 5, outputCanvas.width, 10); // Simple bar
+    }
+    // Note: Implementing real-time audio level visualization requires more complex integration
+    // with the AudioContext and AnalyserNode, which is beyond the scope of this basic example.
+}
+
+// --- Debugging Functions ---
+function debugConversationHistory() {
+    console.log("=== CONVERSATION HISTORY DEBUG ===");
+    const pane = document.getElementById('conversationHistory');
+    if (!pane) {
+        console.error("No conversation pane found");
+        return;
+    }
+    console.log("Number of messages in pane:", pane.children.length);
+    Array.from(pane.children).forEach((msg, index) => {
+        console.log(`Message ${index}:`, msg.textContent.substring(0, 100) + "...");
+    });
+}
+
+function debugWebSocket() {
+    console.log("=== WEBSOCKET DEBUG ===");
+    console.log("WebSocket state:", ws ? ws.readyState : "no websocket");
+    console.log("Active generation ID:", activeGenId);
+    console.log("Audio playing:", isAudioCurrentlyPlaying);
+    console.log("Queue length:", audioPlaybackQueue.length);
+    console.log("Interrupt flags:", { interruptRequested, interruptInProgress });
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        const testMsg = {
+            type: 'test',
+            message: 'Debug test',
+            session_id: SESSION_ID
+        };
+        console.log("Sending test message:", testMsg);
+        ws.send(JSON.stringify(testMsg));
+    }
+}
+
+function testMessageDisplay() {
+    console.log("🧪 Testing message display...");
+    // Test adding a user message
+    addMessageToConversation('user', 'Test user message from console');
+    // Test adding an AI message
+    addMessageToConversation('ai', 'Test AI message from console');
+    // Check if they appeared
+    debugConversationHistory();
+}
+
+function testFullFlow() {
+    console.log("=== TESTING FULL FLOW ===");
+    // Test 1: Check conversation pane
+    debugConversationHistory();
+    // Test 2: Test WebSocket connection
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log("✅ WebSocket is connected");
+        // Send a test message
+        const testMsg = {
+            type: 'test',
+            message: 'Full flow test',
+            session_id: SESSION_ID,
+            timestamp: new Date().toISOString()
+        };
+        console.log("Sending test message:", testMsg);
+        ws.send(JSON.stringify(testMsg));
+        // Send a real message after 2 seconds
+        setTimeout(() => {
+            console.log("Sending real text message...");
+            sendTextMessage("Test message from debug function");
+        }, 2000);
+    } else {
+        console.error("❌ WebSocket not connected");
+    }
+}
+
+function checkConversationStyles() {
+    console.log("=== CHECKING CONVERSATION STYLES ===");
+    const pane = document.getElementById('conversationHistory');
+    if (!pane) {
+        console.error("No conversation pane found");
+        return;
+    }
+    const computedStyle = window.getComputedStyle(pane);
+    console.log("Pane styles:");
+    console.log("- display:", computedStyle.display);
+    console.log("- visibility:", computedStyle.visibility);
+    console.log("- opacity:", computedStyle.opacity);
+    console.log("- height:", computedStyle.height);
+    console.log("- overflow:", computedStyle.overflow);
+    console.log("- position:", computedStyle.position);
+
+    // Check if parent elements are visible
+    let parent = pane.parentElement;
+    let level = 0;
+    while (parent && level < 5) {
+        const parentStyle = window.getComputedStyle(parent);
+        console.log(`Parent ${level} (${parent.tagName}.${parent.className}):`);
+        console.log(` - display: ${parentStyle.display}`);
+        console.log(` - visibility: ${parentStyle.visibility}`);
+        console.log(` - opacity: ${parentStyle.opacity}`);
+        parent = parent.parentElement;
+        level++;
+    }
+}
+
+// --- Sending Messages ---
+function sendTextMessage(text) {
+    if (!text || text.trim() === '') {
+        console.error("❌ Empty message text provided");
+        return;
+    }
+
+    // Add user message to UI immediately
+    addMessageToConversation('user', text);
+
+    // Send to WebSocket server
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log("📤 Sending text message via WebSocket:", text.substring(0, 50) + (text.length > 50 ? '...' : ''));
+        ws.send(JSON.stringify({
+            type: 'text',
+            text: text,
+            session_id: SESSION_ID
+        }));
+    } else {
+        console.error("❌ WebSocket not open, cannot send message.");
+        showNotification("Not connected to server. Cannot send message.", "error");
+    }
+}
+
+// --- Global Functions for Console Debugging ---
+window.loadConversationHistory = loadConversationHistory; // Make available globally if needed elsewhere
+window.displayHistoryList = displayHistoryList;
+window.requestInterrupt = requestInterrupt;
+window.clearAudioPlayback = clearAudioPlayback;
