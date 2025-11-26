@@ -1086,3 +1086,69 @@ function checkConversationStyles() {
 }
 
 window.checkConversationStyles = checkConversationStyles;
+
+
+
+// Add to your AIChat class in chat.js
+async function loadConversationHistory() {
+    try {
+        const response = await fetch('/api/user/conversations');
+        if (response.ok) {
+            const conversations = await response.json();
+            this.displayHistoryList(conversations);
+        }
+    } catch (error) {
+        console.error('Failed to load conversation history:', error);
+    }
+}
+
+function displayHistoryList(conversations) {
+    const historyList = document.getElementById('historyList');
+    
+    if (conversations.length === 0) {
+        historyList.innerHTML = `
+            <div class="text-gray-400 text-center py-8">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+                <p>No recent conversations</p>
+            </div>
+        `;
+        return;
+    }
+
+    historyList.innerHTML = conversations.map(conv => `
+        <div class="history-item p-3 rounded-lg cursor-pointer bg-gray-800" data-conv-id="${conv.id}">
+            <div class="flex justify-between items-start mb-2">
+                <span class="text-xs text-gray-400">${new Date(conv.timestamp).toLocaleDateString()}</span>
+                <span class="text-xs text-indigo-400">${new Date(conv.timestamp).toLocaleTimeString()}</span>
+            </div>
+            <div class="text-sm font-medium truncate mb-1">${this.escapeHtml(conv.user_message)}</div>
+            <div class="text-xs text-gray-400 truncate">${this.escapeHtml(conv.ai_message)}</div>
+        </div>
+    `).join('');
+
+    // Add click handlers
+    historyList.querySelectorAll('.history-item').forEach(item => {
+        item.addEventListener('click', () => {
+            this.loadConversation(item.dataset.convId);
+        });
+    });
+}
+
+async function loadConversation(conversationId) {
+    try {
+        const response = await fetch(`/api/conversations/${conversationId}`);
+        if (response.ok) {
+            const conversation = await response.json();
+            this.displayConversation(conversation);
+        }
+    } catch (error) {
+        console.error('Failed to load conversation:', error);
+    }
+}
+
+// Add to your initEventListeners method
+document.getElementById('refreshHistoryBtn').addEventListener('click', () => {
+    this.loadConversationHistory();
+});
