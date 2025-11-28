@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Porturs LTD</title>
+    <style>
+        * {
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            background-color: #f9fafb;
+            min-height: 100vh;
+            position: relative;
+            overflow: hidden;
+            color: #1f2937;
+        }
+        
+        .container {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .header {
+            background-color: #f9fafb;
+            padding: 15px 10px;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: -7rem;
+            background-color: #f9fafb;
+            margin-top: -1.5rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .logo {
+            font-size: 26px;
+            font-weight: 700;
+            color: #111827;
+            margin-top: 1rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .header-icons {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 1rem;
+            margin-top: 1rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .icon {
+            font-size: 23px;
+            cursor: pointer;
+            color: #4b5563;
+            transition: color 0.2s;
+            padding: 6px;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .icon:hover {
+            color: #111827;
+        }
+        
+        .menu-icon {
+            font-size: 32px;
+            cursor: pointer;
+            color: #4b5563;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        
+        .content-sections {
+            display: flex;
+            gap: 10px;
+            margin-top: 2.5rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            width: 56.5rem;
+            height: 37.5rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+            border: 1px solid #e5e7eb;
+            background-color: #fff;
+        }
+
+        
+        .main-content {
+            margin-top: 1.5rem;
+            flex: 0 0 885px;
+            background-color: #fff;
+            padding: 5px;
+            height: 550px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .conversation-card {
+            margin-left: .23rem;
+            background-color: #ffffff;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+            border: 1px solid #e5e7eb;
+            width: 845px;
+            height: 200px;
+            overflow: hidden;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .conversation-card * {
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif !important;
+        }
+        
+        .chat-section {
+            flex: 1;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+            border: 1px solid #e5e7eb;
+            height: 150px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .chat-label {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .user-info {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin-top: 8px;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .user-status-container {
+            display: flex;
+            gap: 0.5rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .text-sm {
+            font-size: 0.875rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .bg-indigo-100 {
+            background-color: #F5F5F5;
+        }
+
+        .rounded-md {
+            border-radius: 0.375rem;
+        }
+
+
+        .text-gray-500 {
+            color: #6b7280;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .bg-gray-100 {
+            background-color: #f3f4f6;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .px-3 {
+            padding-left: 0.75rem;
+            padding-right: 0.75rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .py-1 {
+            padding-top: 0.25rem;
+            padding-bottom: 0.25rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .rounded-full {
+            border-radius: 9999px;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .text-yellow-600 {
+            color: #d97706;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .text-green-600 {
+            color: #059669;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+
+        /* Vertical layout for pulse and chat */
+        .vertical-chat-container {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            width: 500px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .pulse-container {
+            background-color: #f9fafb;
+            padding: 1.5rem;
+            position: relative;
+            height: 200px;
+            overflow: hidden;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .pulse-ring {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(79, 70, 229, 0.8);
+            box-shadow: 0 0 15px rgba(79, 70, 229, 0.5);
+            z-index: 10;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .pulse-ring::before {
+            content: '';
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: rgba(79, 70, 229, 0.3);
+            animation: pulse 2s infinite;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .pulse-ring::after {
+            content: '';
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(79, 70, 229, 0.2);
+            animation: pulse 2s infinite 0.5s;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .pulse-circle {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(79, 70, 229, 0.1);
+            animation: pulse 2s infinite;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .circle-1 {
+            width: 100px;
+            height: 100px;
+            top: calc(50% - 50px);
+            left: calc(50% - 50px);
+            animation-delay: 0.2s;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .circle-2 {
+            width: 140px;
+            height: 140px;
+            top: calc(50% - 70px);
+            left: calc(50% - 70px);
+            animation-delay: 0.4s;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .circle-3 {
+            width: 180px;
+            height: 180px;
+            top: calc(50% - 90px);
+            left: calc(50% - 90px);
+            animation-delay: 0.6s;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        @keyframes pulse {
+            0% {
+                transform: scale(0.8);
+                opacity: 0.8;
+            }
+            50% {
+                transform: scale(1.2);
+                opacity: 0.4;
+            }
+            100% {
+                transform: scale(1.5);
+                opacity: 0;
+            }
+        }
+        
+        .pulse-status {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1rem;
+            color: #4f46e5;
+            font-weight: 600;
+            z-index: 20;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 8px 16px;
+            border-radius: 20px;
+            white-space: nowrap;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        
+        .pulse-title {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #4f46e5;
+            z-index: 20;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+
+        /* Chat input container */
+        .chat-input-container {
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+            border: 1px solid #e5e7eb;
+            padding: 1.5rem;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+
+
+        
+        .input-container {
+            position: relative;
+            margin-bottom: 0.75rem;
+        }
+        
+        .text-input {
+            width: 24rem;
+            background-color: #f9fafb;
+            box-shadow: 0 0 0 2px #dcdcdc;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 0.75rem 3.5rem 0.75rem 0.75rem;
+            font-size: 0.875rem;
+            resize: none;
+            min-height: 4.5rem;
+            max-height: 9rem;
+            overflow-y: auto;
+            line-height: 1.5;
+            padding-right: 3.5rem;
+        }
+        
+        .text-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+        }
+
+        .char-count {
+            position: absolute;
+            bottom: 0.75rem;
+            right: 3.25rem;
+            font-size: 0.75rem;
+            color: var(--text-light);
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 0.125rem 0.375rem;
+            border-radius: 0.25rem;
+        }
+
+        .send-btn {
+            position: absolute;
+            bottom: 0.75rem;
+            right: 0.75rem;
+            background-color: var(--primary-color);
+            color: black;
+            border: none;
+            border-radius: 0.375rem;
+            width: 2.25rem;
+            height: 2.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .send-btn:hover {
+            background-color: var(--primary-dark);
+        }
+        
+        .send-btn:disabled {
+            background-color: rgba(79, 70, 229, 0.2);
+            cursor: not-allowed;
+        }
+
+        /* Tailwind-inspired utility classes */
+        .p-4 { padding: 1rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .rounded-lg { border-radius: 0.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .flex { display: flex; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .items-center { align-items: center; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .items-start { align-items: flex-start; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .space-x-2 > * + * { margin-left: 0.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .space-y-3 > * + * { margin-top: 0.75rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .flex-grow { flex-grow: 1; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .flex-shrink-0 { flex-shrink: 0; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .bg-gray-200 { background-color: #e5e7eb; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .text-gray-700 { color: #374151; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .p-3 { padding: 0.75rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .rounded-l { border-top-left-radius: 0.375rem; border-bottom-left-radius: 0.375rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .border { border-width: 1px; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .border-gray-300 { border-color: #d1d5db; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .focus\:outline-none:focus {
+            outline: 2px solid transparent;
+            outline-offset: 2px;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        .focus\:ring-2:focus {
+            box-shadow: 0 0 0 2px #818cf8;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        .bg-indigo-600 { background-color: #4f46e5; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .hover\:bg-indigo-700:hover { background-color: #4338ca; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .rounded-r-lg { 
+            border-top-right-radius: 0.5rem; 
+            border-bottom-right-radius: 0.5rem; 
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif; 
+        }
+        .border-indigo-700 { border-color: #4338ca; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .transition-colors {
+            transition-property: background-color, border-color, color;
+            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+            transition-duration: 150ms;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+        .h-6 { height: 1.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .w-6 { width: 1.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .h-4 { height: 1rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .w-4 { width: 1rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .w-8 { width: 2rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .h-8 { height: 2rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .justify-between { justify-content: space-between; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .mt-2 { margin-top: 0.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .mb-4 { margin-bottom: 1rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .mb-1 { margin-bottom: 0.25rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .mr-3 { margin-right: 0.75rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .text-xs { font-size: 0.75rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .text-gray-500 { color: #6b7280; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .rounded { border-radius: 0.25rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .bg-blue-100 { background-color: #dbeafe; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .bg-green-100 { background-color: #dcfce7; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .text-blue-700 { color: #1d4ed8; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .text-green-700 { color: #047857; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .font-semibold { font-weight: 600; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .font-bold { font-weight: 700; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        .bg-white { background-color: #ffffff; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
+        
+        /* Ensure all text in conversation cards uses the correct font */
+        .conversation-card,
+        .conversation-card * {
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif !important;
+        }
+
+        /* NEW: Send icon rotation */
+        .send-icon {
+            transform: rotate(-90deg);
+            transform-origin: center;
+        }
+
+        /* NEW: Scrollable textarea styling */
+        #textInput {
+            min-height: 4.5rem;   /* ~3 lines */
+            max-height: 9rem;     /* optional cap */
+            overflow-y: auto;
+            line-height: 1.5;
+            resize: none;         /* prevent manual resizing */
+        }
+        
+        /* NEW: Centered and larger icons */
+        .icon-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 2.5rem;  /* Increased from 2rem */
+            height: 2.5rem; /* Increased from 2rem */
+            border-radius: 50%;
+            margin-right: 0.75rem;
+            flex-shrink: 0;
+        }
+        
+        .user-icon {
+            background-color: #dbeafe; /* blue-100 */
+            color: #1d4ed8; /* blue-700 */
+        }
+        
+        .ai-icon {
+            background-color: #dcfce7; /* green-100 */
+            color: #047857; /* green-700 */
+        }
+        
+        .icon-svg {
+            width: 1.25rem;  /* Increased from 1rem */
+            height: 1.25rem; /* Increased from 1rem */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-top">
+                <div class="user-info">
+                    <div class="logo">Porturs LTD</div>
+                    <div class="user-status-container">
+                        <div class="text-sm text-gray-500 bg-indigo-100 px-3 py-1 rounded-md">
+                            User: <span id="currentUserEmail">Loading...</span>
+                        </div>
+                        <div class="text-sm text-gray-500 bg-indigo-100 px-3 py-1 rounded-md">
+                            Status: <span id="connectionStatus" class="text-yellow-600">Connecting...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-icons">
+                    <div class="icon menu-icon">≡</div>
+                    <div class="icon" title="Feedback">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+                        </svg>
+                    </div>
+                    <div class="icon" title="Share">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                            <polyline points="16 6 12 2 8 6"></polyline>
+                            <line x1="12" y1="2" x2="12" y2="15"></line>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="content-sections">
+            <div class="main-content">
+                <!-- Conversation cards will be dynamically inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Vertical container with pulse and chat -->
+    <div class="vertical-chat-container">
+        <!-- Pulse container -->
+        <div class="pulse-container">
+            <div class="pulse-circle circle-1"></div>
+            <div class="pulse-circle circle-2"></div>
+            <div class="pulse-circle circle-3"></div>
+            <div class="pulse-ring"></div>
+        </div>
+        
+        <!-- Chat input container -->
+        <div class="chat-input-container">
+
+            <div class="p-2 rounded-lg border border-gray-200 shadow-sm">
+
+
+                <div class="input-container">
+                    <textarea class="text-input" id="textInput" placeholder="Type your message here..."></textarea>
+                    <div class="char-count" id="charCount">0/500</div>
+                    <button class="send-btn" id="sendTextBtn" disabled>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="send-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                        </svg>
+                    </button>
+                </div>
+
+
+                <div class="flex justify-between items-center mt-2 text-xs text-gray-500">
+                    <div>
+                        Models: <span id="modelStatus" class="text-yellow-600">Loading...</span>
+                    </div>
+                    <div>
+                        Press <kbd class="px-2 py-1 bg-gray-100 rounded text-gray-700">Enter</kbd> to send • 
+                        Press <kbd class="px-2 py-1 bg-gray-100 rounded text-gray-700">Esc</kbd> to interrupt
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const conversations = [
+            {
+                id: 1,
+                date: "2023-10-15 14:30",
+                user_message: "Hello, can you help me with my project?",
+                ai_message: "Of course! I'd be happy to help. What kind of project are you working on?"
+            },
+            {
+                id: 2,
+                date: "2023-10-15 15:45",
+                user_message: "I need to create a responsive website layout.",
+                ai_message: "Great! I can assist with that. Are you using CSS frameworks like Bootstrap or Tailwind, or are you writing custom CSS?"
+            },
+            {
+                id: 3,
+                date: "2023-10-16 09:20",
+                user_message: "I'm using Tailwind CSS. Can you show me an example of a card component?",
+                ai_message: "Certainly! Here's an example of a card component using Tailwind CSS: <div class='bg-white rounded-lg shadow-md p-6'>Card content</div>"
+            },
+            {
+                id: 4,
+                date: "2023-10-16 11:15",
+                user_message: "How do I center a div?",
+                ai_message: "You can center a div using flexbox: display: flex; justify-content: center; align-items: center;"
+            },
+            {
+                id: 5,
+                date: "2023-10-17 13:40",
+                user_message: "What's the difference between let and const?",
+                ai_message: "let allows reassignment, while const creates a constant reference that cannot be reassigned."
+            },
+            {
+                id: 6,
+                date: "2023-10-18 10:30",
+                user_message: "Can you explain async/await in JavaScript?",
+                ai_message: "Async/await is syntactic sugar for promises that makes asynchronous code easier to write and read. The async keyword is used to declare an asynchronous function, and await is used to wait for a promise to resolve."
+            },
+            {
+                id: 7,
+                date: "2023-10-19 16:45",
+                user_message: "How do I handle errors in async functions?",
+                ai_message: "You can use try/catch blocks inside async functions to handle errors. Any rejected promise inside the try block will be caught by the catch block."
+            }
+        ];
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function renderConversations() {
+            const mainContent = document.querySelector('.main-content');
+            mainContent.innerHTML = '';
+            
+            conversations.forEach(conv => {
+                const card = document.createElement('div');
+                card.className = 'conversation-card';
+                
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="text-sm text-gray-500">${formatDate(conv.date)}</div>
+                        <div class="text-xs bg-gray-100 px-2 py-1 rounded">Conversation #${conv.id}</div>
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex items-start">
+                            <div class="icon-container user-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                            <div class="flex-1">
+                                <div class="text-blue-700 font-semibold mb-1">User:</div>
+                                <div class="text-gray-700 bg-gray-50 p-3 rounded">${escapeHtml(conv.user_message)}</div>
+                            </div>
+                        </div>
+                        <div class="flex items-start">
+                            <div class="icon-container ai-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                            <div class="flex-1">
+                                <div class="text-green-700 font-semibold mb-1">AI Companion:</div>
+                                <div class="text-gray-700 bg-gray-50 p-3 rounded">${escapeHtml(conv.ai_message)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                mainContent.appendChild(card);
+            });
+        }
+
+        // Simulate status changes
+        setTimeout(() => {
+            document.getElementById('currentUserEmail').textContent = 'user@example.com';
+        }, 1000);
+        
+        setTimeout(() => {
+            document.getElementById('connectionStatus').textContent = 'Connected';
+            document.getElementById('connectionStatus').classList.remove('text-yellow-600');
+            document.getElementById('connectionStatus').classList.add('text-green-600');
+        }, 2000);
+        
+        setTimeout(() => {
+            document.getElementById('modelStatus').textContent = 'Ready';
+            document.getElementById('modelStatus').classList.remove('text-yellow-600');
+            document.getElementById('modelStatus').classList.add('text-green-600');
+        }, 1500);
+        
+        document.getElementById('sendTextBtn').addEventListener('click', function() {
+            const input = document.getElementById('textInput');
+            if (input.value.trim() !== '') {
+                alert('Message sent: ' + input.value);
+                input.value = '';
+                
+                // Briefly change pulse status when sending
+                const pulseStatus = document.querySelector('.pulse-status');
+                const originalStatus = pulseStatus ? pulseStatus.textContent : 'Ready';
+                if (pulseStatus) {
+                    pulseStatus.textContent = 'Processing...';
+                    setTimeout(() => {
+                        pulseStatus.textContent = originalStatus;
+                    }, 1500);
+                }
+            }
+        });
+        
+        document.getElementById('textInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault(); // Prevent newline
+                document.getElementById('sendTextBtn').click();
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', renderConversations);
+
+
+
+        const textInput = document.getElementById('textInput');
+        const charCount = document.getElementById('charCount');
+        const sendButton = document.getElementById('sendTextBtn');
+        const sendIcon = document.querySelector('.send-icon'); // Select the send icon
+
+        textInput.addEventListener('input', function() {
+            const currentLength = this.value.length;
+            const maxLength = 500;
+            charCount.textContent = `${currentLength}/${maxLength}`;
+            
+            // Enable/disable send button based on content
+            if (currentLength > 0 && currentLength <= maxLength) {
+                sendButton.disabled = false;
+                sendButton.style.backgroundColor = '#4f46e5'; // indigo-600
+                sendButton.style.cursor = 'pointer';
+                sendIcon.style.color = '#ffffff'; // Set icon color to white
+            } else {
+                sendButton.disabled = true;
+                sendButton.style.backgroundColor = 'rgba(79, 70, 229, 0.2)'; // indigo-600 with opacity-20
+                sendButton.style.cursor = 'not-allowed';
+                sendIcon.style.color = ''; // Reset to default color
+            }
+            
+            // Optional: Change color when approaching limit
+            if (currentLength > 450) {
+                charCount.style.color = '#ef4444'; // red-500
+            } else {
+                charCount.style.color = ''; // reset to default
+            }
+        });
+    </script>
+</body>
+</html>
