@@ -25,6 +25,8 @@
             margin: 0 auto;
             padding: 20px;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            position: relative;
+            z-index: 1;
         }
         
         .header {
@@ -44,7 +46,7 @@
         }
         
         .logo {
-            font-size: 26px;
+            font-size: 2rem;
             font-weight: 700;
             color: #111827;
             margin-top: 1rem;
@@ -80,42 +82,87 @@
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
         
-        
         .content-sections {
+            position: fixed;
+            margin-top: 2.5rem;
+            top: 80px;
+            left: 20px;
+            bottom: 1.2rem;
+            width: 57.1rem;
             display: flex;
             gap: 10px;
-            margin-top: 2.5rem;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
-            width: 56.5rem;
-            height: 37.5rem;
             border-radius: 12px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.03);
             border: 1px solid #e5e7eb;
             background-color: #fff;
+            z-index: 2;
+            overflow: hidden;
         }
 
-        
+        .conversations-filter {
+            display: flex;
+            gap: 0.5rem;
+            position: absolute;
+            margin-top: -2.7rem;
+            margin-left: 42.5rem;
+        }
+
+        .conversations-title {
+            padding-left: .8rem;
+            font-size: 1.3rem;
+        }
+
+
+        .filter-btn {
+            padding: 0.375rem 0.875rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            border: 1px solid transparent;
+            border-radius: 0.375rem;
+            background-color: #f3f4f6; /* gray-100 */
+            color: #4b5563; /* gray-600 */
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        }
+
+        .filter-btn:hover {
+            background-color: #e5e7eb; /* gray-200 */
+            color: #1f2937; /* gray-800 */
+        }
+
+        .filter-btn.active {
+            background-color: #4f46e5; /* indigo-600 */
+            color: white;
+            border-color: #4f46e5;
+        }
+
+        .filter-btn.active:hover {
+            background-color: #4338ca; /* indigo-700 */
+        }
+
         .main-content {
-            margin-top: 1.5rem;
+            margin-top: 3.5rem;
+            margin-left: -10rem;
             flex: 0 0 885px;
             background-color: #fff;
             padding: 5px;
-            height: 550px;
+            height: 85%;
             overflow-y: auto;
             overflow-x: hidden;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-        
+
         .conversation-card {
             margin-left: .23rem;
             background-color: #ffffff;
             padding: 20px;
-            margin-bottom: 20px;
+            margin-bottom: 2rem;
             border-radius: 12px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.03);
             border: 1px solid #e5e7eb;
-            width: 845px;
-            height: 200px;
+            width: 95.4%;
+            height: 40%;
             overflow: hidden;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
@@ -149,7 +196,7 @@
             display: flex;
             flex-direction: column;
             gap: 1rem;
-            margin-top: 8px;
+            margin-top: -.3rem;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
         
@@ -171,7 +218,6 @@
         .rounded-md {
             border-radius: 0.375rem;
         }
-
 
         .text-gray-500 {
             color: #6b7280;
@@ -212,11 +258,12 @@
 
         /* Vertical layout for pulse and chat */
         .vertical-chat-container {
+            margin-right: -1rem;
             position: fixed;
-            bottom: 2rem;
+            z-index: 10;
+            bottom: 1.3rem;
             right: 2rem;
             width: 500px;
-            z-index: 10;
             display: flex;
             flex-direction: column;
             gap: 2rem;
@@ -358,8 +405,6 @@
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
 
-
-        
         .input-container {
             position: relative;
             margin-bottom: 0.75rem;
@@ -569,6 +614,16 @@
         </div>
         
         <div class="content-sections">
+            
+            <div class="conversations-header">
+                <h2 class="conversations-title">Conversations</h2>
+                <div class="conversations-filter">
+                    <button class="filter-btn active">All</button>
+                    <button class="filter-btn">Recent</button>
+                    <button class="filter-btn">Starred</button>
+                </div>
+            </div>
+
             <div class="main-content">
                 <!-- Conversation cards will be dynamically inserted here -->
             </div>
