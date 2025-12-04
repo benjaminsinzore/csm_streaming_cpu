@@ -5,258 +5,945 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Porturs LTD</title>
     <style>
+        :root {
+            --primary-color: #4f46e5;
+            --primary-dark: #4338ca;
+            --border-color: #e5e7eb;
+            --text-light: #6b7280;
+        }
         * {
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            box-sizing: border-box;
         }
-        
         body {
             margin: 0;
             padding: 0;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
             background-color: #f9fafb;
             min-height: 100vh;
-            position: relative;
-            overflow: hidden;
             color: #1f2937;
         }
-        
         .container {
-            max-width: 1500px;
+            width: 100%;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
-            position: relative;
-            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
         }
-        
+        /* Header Styles */
         .header {
-            background-color: #f9fafb;
-            padding: 15px 10px;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            width: 100%;
+            max-width: 900px;
+            margin-bottom: 20px;
+            flex-shrink: 0;
         }
-        
         .header-top {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: -7rem;
-            background-color: #f9fafb;
-            margin-top: -1.5rem;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            padding: 15px 20px;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+            border: 1px solid #e5e7eb;
+            flex-wrap: wrap;
+            gap: 15px;
+            position: relative;
         }
-        
-        .logo {
-            font-size: 2rem;
-            font-weight: 700;
-            color: #111827;
-            margin-top: 1rem;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
-        }
-        
-        .header-icons {
+        .user-info {
             display: flex;
             flex-direction: column;
-            align-items: flex-end;
-            gap: 1rem;
-            margin-top: 1rem;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            gap: 15px;
+            flex-wrap: wrap;
+            flex: 1;
         }
-        
-        .icon {
-            font-size: 23px;
-            cursor: pointer;
-            color: #4b5563;
-            transition: color 0.2s;
-            padding: 6px;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4f46e5;
         }
-        
-        .icon:hover {
-            color: #111827;
+        /* Updated user status container - now inline-flex */
+        .user-status-container {
+            display: inline-flex; /* Makes width intrinsic based on content */
+            gap: 15px; /* Space between the two items */
+            flex-wrap: wrap;
+            background-color: #f0f4ff;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid #dbeafe;
+            /* width: auto; is inherent to inline-flex */
         }
-        
-        .menu-icon {
-            font-size: 32px;
-            cursor: pointer;
-            color: #4b5563;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
-        }
-        
-        .content-sections {
-            position: fixed;
-            margin-top: 2.5rem;
-            top: 80px;
-            left: 20px;
-            bottom: 1.2rem;
-            width: 57.1rem;
+        .user-status-item {
             display: flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+        .header-icons {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        .header-icons-vertical {
+            display: none;
+            flex-direction: column;
             gap: 10px;
+            position: absolute;
+            top: 15px;
+            right: 15px;
+        }
+        .icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            background-color: #f3f4f6;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+        .icon:hover {
+            background-color: #e5e7eb;
+            color: #4b5563;
+        }
+        .menu-icon {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        /* Content Sections */
+        .content-sections {
+            width: 100%;
+            max-width: 900px;
             border-radius: 12px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.03);
             border: 1px solid #e5e7eb;
             background-color: #fff;
-            z-index: 2;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
         }
-
+        .conversations-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 20px 0;
+            flex-wrap: wrap;
+            gap: 15px;
+            flex-shrink: 0;
+        }
         .conversations-filter {
             display: flex;
             gap: 0.5rem;
-            position: absolute;
-            margin-top: -2.7rem;
-            margin-left: 42.5rem;
         }
-
         .conversations-title {
-            padding-left: .8rem;
-            font-size: 1.3rem;
+            font-size: 1.5rem;
+            margin: 0;
         }
-
-
         .filter-btn {
             padding: 0.375rem 0.875rem;
             font-size: 0.875rem;
             font-weight: 600;
             border: 1px solid transparent;
             border-radius: 0.375rem;
-            background-color: #f3f4f6; /* gray-100 */
-            color: #4b5563; /* gray-600 */
+            background-color: #f3f4f6;
+            color: #4b5563;
             cursor: pointer;
             transition: all 0.2s ease-in-out;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-
         .filter-btn:hover {
-            background-color: #e5e7eb; /* gray-200 */
-            color: #1f2937; /* gray-800 */
+            background-color: #e5e7eb;
+            color: #1f2937;
         }
-
         .filter-btn.active {
-            background-color: #4f46e5; /* indigo-600 */
+            background-color: #4f46e5;
             color: white;
             border-color: #4f46e5;
         }
-
         .filter-btn.active:hover {
-            background-color: #4338ca; /* indigo-700 */
+            background-color: #4338ca;
         }
-
         .main-content {
-            margin-top: 3.5rem;
-            margin-left: -10rem;
-            flex: 0 0 885px;
             background-color: #fff;
-            padding: 5px;
-            height: 85%;
+            padding: 20px;
+            flex: 1;
             overflow-y: auto;
-            overflow-x: hidden;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            min-height: 0;
         }
-
         .conversation-card {
-            margin-left: .23rem;
             background-color: #ffffff;
             padding: 20px;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
             border-radius: 12px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.03);
             border: 1px solid #e5e7eb;
-            width: 95.4%;
-            height: 40%;
-            overflow: hidden;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            position: relative;
+            transition: all 0.3s ease;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
         }
-        
-        .conversation-card * {
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif !important;
+        .conversation-card.expanded {
+            min-height: 500px;
+            z-index: 3;
         }
-        
-        .chat-section {
+        .conversation-sections {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
             flex: 1;
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-            border: 1px solid #e5e7eb;
-            height: 150px;
+            min-height: 0;
+        }
+        .message-section {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+        }
+        .message-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+        .message-label {
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        .icon-container {
             display: flex;
             align-items: center;
             justify-content: center;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 50%;
+            margin-right: 0.75rem;
+            flex-shrink: 0;
         }
-        
-        .chat-label {
-            font-size: 18px;
-            font-weight: 600;
-            color: #1f2937;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        .user-icon {
+            background-color: #dbeafe;
+            color: #1d4ed8;
         }
-        
-        .user-info {
+        .ai-icon {
+            background-color: #dcfce7;
+            color: #047857;
+        }
+        .icon-svg {
+            width: 1.25rem;
+            height: 1.25rem;
+        }
+        .action-icons {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
             display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            margin-top: -.3rem;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            gap: 10px;
+            flex-shrink: 0;
         }
-        
-        .user-status-container {
+        .action-icon {
             display: flex;
-            gap: 0.5rem;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
-        }
-        
-        .text-sm {
-            font-size: 0.875rem;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
-        }
-        
-        .bg-indigo-100 {
-            background-color: #F5F5F5;
-        }
-
-        .rounded-md {
-            border-radius: 0.375rem;
-        }
-
-        .text-gray-500 {
-            color: #6b7280;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
-        }
-        
-        .bg-gray-100 {
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
             background-color: #f3f4f6;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
         }
-        
-        .px-3 {
-            padding-left: 0.75rem;
-            padding-right: 0.75rem;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        .action-icon:hover {
+            background-color: #e5e7eb;
+            color: #4b5563;
         }
-        
-        .py-1 {
-            padding-top: 0.25rem;
-            padding-bottom: 0.25rem;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        .action-icon.active {
+            background-color: #fef3c7;
+            color: #f59e0b;
         }
-        
-        .rounded-full {
-            border-radius: 9999px;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        .action-icon svg {
+            width: 18px;
+            height: 18px;
         }
-        
-        .text-yellow-600 {
-            color: #d97706;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        .message-content {
+            padding: 8px 15px;
+            background-color: #f9fafb;
+            border-radius: 8px;
+            line-height: 1.4;
+            display: flex;
+            align-items: center;
+            min-height: 1.5rem;
+            overflow: hidden;
+            flex-shrink: 0;
         }
-        
-        .text-green-600 {
-            color: #059669;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        .message-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 1rem;
         }
-
-        /* Vertical layout for pulse and chat */
+        .conversation-card.expanded .message-content {
+            display: block;
+            height: auto;
+            max-height: 200px;
+            padding: 15px;
+            text-align: justify;
+            line-height: 1.6;
+            overflow-y: auto;
+            flex: 1;
+            min-height: 0;
+        }
+        .conversation-card.expanded .message-text {
+            white-space: normal;
+            overflow: visible;
+            text-overflow: clip;
+        }
+        /* Custom scrollbar styling for expanded messages */
+        .conversation-card.expanded .message-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        .conversation-card.expanded .message-content::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 3px;
+        }
+        .conversation-card.expanded .message-content::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+        .conversation-card.expanded .message-content::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+        /* Utility classes */
+        .flex { display: flex; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .mb-4 { margin-bottom: 1rem; }
+        .font-semibold { font-weight: 600; }
+        .text-blue-700 { color: #1d4ed8; }
+        .text-green-700 { color: #047857; }
+        .text-sm { font-size: 0.875rem; }
+        .text-xs { font-size: 0.75rem; }
+        .text-gray-500 { color: #6b7280; }
+        .bg-gray-100 { background-color: #f3f4f6; }
+        .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+        .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+        .rounded { border-radius: 0.25rem; }
+        .text-yellow-600 { color: #d97706; }
+        /* --- ADDED RESPONSIVE HEIGHT STYLES --- */
+        /* Media query for screen heights 820px and below */
+        @media (max-height: 820px) {
+            .container {
+                padding: 15px;
+            }
+            .header {
+                margin-bottom: 15px;
+            }
+            .header-top {
+                padding: 12px 15px;
+                gap: 10px;
+            }
+            .logo {
+                font-size: 1.3rem;
+            }
+            .user-status-container {
+                gap: 10px;
+                padding: 8px 12px;
+            }
+            .user-status-item {
+                font-size: 0.8rem;
+            }
+            .icon {
+                width: 36px;
+                height: 36px;
+            }
+            .conversations-header {
+                padding: 15px 15px 0;
+            }
+            .conversations-title {
+                font-size: 1.3rem;
+            }
+            .filter-btn {
+                padding: 0.3rem 0.7rem;
+                font-size: 0.8rem;
+            }
+            .conversation-card {
+                min-height: 120px;
+                padding: 15px;
+                margin-bottom: 1rem;
+            }
+            .conversation-card.expanded {
+                min-height: 350px;
+            }
+            .message-header {
+                margin-bottom: 8px;
+            }
+            .icon-container {
+                width: 2rem;
+                height: 2rem;
+                margin-right: 0.5rem;
+            }
+            .icon-svg {
+                width: 1rem;
+                height: 1rem;
+            }
+            .message-label {
+                font-size: 0.9rem;
+                margin-left: 8px;
+            }
+            .message-content {
+                padding: 6px 12px;
+                min-height: 1.2rem;
+            }
+            .conversation-card.expanded .message-content {
+                padding: 12px;
+                max-height: 150px;
+            }
+            .action-icons {
+                bottom: 10px;
+                right: 10px;
+                gap: 8px;
+            }
+            .action-icon {
+                width: 28px;
+                height: 28px;
+            }
+            .action-icon svg {
+                width: 16px;
+                height: 16px;
+            }
+            .main-content {
+                padding: 15px;
+            }
+        }
+        /* Media query for screen heights 600px and below */
+        @media (max-height: 600px) {
+            .container {
+                padding: 10px;
+            }
+            .header {
+                margin-bottom: 10px;
+            }
+            .header-top {
+                padding: 10px 12px;
+                gap: 8px;
+            }
+            .logo {
+                font-size: 1.1rem;
+            }
+            .user-status-container {
+                gap: 8px;
+                padding: 6px 10px;
+            }
+            .user-status-item {
+                font-size: 0.75rem;
+            }
+            .icon {
+                width: 32px;
+                height: 32px;
+            }
+            .conversations-header {
+                padding: 10px 10px 0;
+            }
+            .conversations-title {
+                font-size: 1.1rem;
+            }
+            .filter-btn {
+                padding: 0.25rem 0.5rem;
+                font-size: 0.75rem;
+            }
+            .conversation-card {
+                min-height: 100px;
+                padding: 12px;
+                margin-bottom: 0.8rem;
+            }
+            .conversation-card.expanded {
+                min-height: 250px;
+            }
+            .message-header {
+                margin-bottom: 6px;
+            }
+            .icon-container {
+                width: 1.75rem;
+                height: 1.75rem;
+                margin-right: 0.4rem;
+            }
+            .icon-svg {
+                width: 0.9rem;
+                height: 0.9rem;
+            }
+            .message-label {
+                font-size: 0.8rem;
+                margin-left: 6px;
+            }
+            .message-content {
+                padding: 5px 10px;
+                min-height: 1rem;
+            }
+            .conversation-card.expanded .message-content {
+                padding: 10px;
+                max-height: 120px;
+            }
+            .action-icons {
+                bottom: 8px;
+                right: 8px;
+                gap: 6px;
+            }
+            .action-icon {
+                width: 24px;
+                height: 24px;
+            }
+            .action-icon svg {
+                width: 14px;
+                height: 14px;
+            }
+            .main-content {
+                padding: 12px;
+            }
+        }
+        /* Desktop styles (950px and above) */
+        @media (min-width: 950px) {
+            .container {
+                padding: 20px;
+                align-items: flex-start;
+                justify-content: flex-start;
+                min-width: 615px; /* Added minimum width */
+            }
+            .header {
+                position: fixed;
+                top: 20px;
+                left: 20px;
+                max-width: 900px;
+                z-index: 10;
+            }
+            .content-sections {
+                position: fixed;
+                bottom: 20px;
+                left: 20px;
+                max-width: 900px;
+                height: calc(100vh - 180px); /* Default desktop height */
+                min-height: 400px; /* Added minimum height */
+                margin-top: 0;
+                min-width: 615px; /* Added minimum width */
+            }
+            .conversation-card {
+                min-height: 180px;
+            }
+            .conversation-card.expanded {
+                min-height: 500px;
+            }
+            /* Show vertical icons and hide horizontal ones on desktop */
+            .header-icons {
+                display: none;
+            }
+            .header-icons-vertical {
+                display: flex;
+            }
+            /* Fixed icons container for desktop */
+            .desktop-icons-container {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                z-index: 20;
+            }
+            /* Adjust header-top layout for desktop */
+            .header-top {
+                justify-content: flex-start; /* Align content to the start */
+            }
+            .user-info {
+                flex: 0 1 auto; /* Don't force user-info to take up space */
+                width: auto; /* Ensure width is based on content */
+            }
+            /* Ensure user-status-container wraps content */
+            .user-status-container {
+                width: auto; /* Override any potential width: 100% */
+                justify-content: flex-start; /* Align items within container */
+            }
+            /* Adjust height for short desktop screens */
+            @media (max-height: 820px) {
+                .header {
+                    top: 15px;
+                    left: 15px;
+                }
+                .content-sections {
+                    bottom: 15px;
+                    left: 15px;
+                    height: calc(100vh - 150px);
+                    min-height: 350px;
+                }
+                .desktop-icons-container {
+                    top: 15px;
+                    right: 15px;
+                }
+            }
+            @media (max-height: 600px) {
+                .header {
+                    top: 10px;
+                    left: 10px;
+                }
+                .content-sections {
+                    bottom: 10px;
+                    left: 10px;
+                    height: calc(100vh - 120px);
+                    min-height: 300px;
+                }
+                .desktop-icons-container {
+                    top: 10px;
+                    right: 10px;
+                    gap: 8px;
+                }
+            }
+            /* --- INCREASED SIZE FOR DESKTOP/LARGE SCREENS --- */
+            .vertical-chat-container {
+                width: 600px; /* Increased from 500px */
+                gap: 2.5rem; /* Increased from 2rem */
+                bottom: 2rem; /* Increased from 1.3rem */
+                right: 3rem; /* Increased from 2rem */
+            }
+            .pulse-container {
+                height: 320px; /* Increased from 250px */
+                width: 320px; /* Increased from 250px to maintain aspect ratio */
+                padding: 2rem; /* Increased from 1.5rem */
+            }
+            .pulse-ring {
+                width: 50px; /* Increased from 40px */
+                height: 50px; /* Increased from 40px */
+            }
+            .pulse-ring::before {
+                width: 75px; /* Increased from 60px */
+                height: 75px; /* Increased from 60px */
+            }
+            .pulse-ring::after {
+                width: 100px; /* Increased from 80px */
+                height: 100px; /* Increased from 80px */
+            }
+            .circle-1 {
+                width: 125px; /* Increased from 100px */
+                height: 125px; /* Increased from 100px */
+                top: calc(50% - 62.5px); /* Adjusted for new size */
+                left: calc(50% - 62.5px); /* Adjusted for new size */
+            }
+            .circle-2 {
+                width: 175px; /* Increased from 140px */
+                height: 175px; /* Increased from 140px */
+                top: calc(50% - 87.5px); /* Adjusted for new size */
+                left: calc(50% - 87.5px); /* Adjusted for new size */
+            }
+            .circle-3 {
+                width: 250px; /* Increased from 180px */
+                height: 250px; /* Increased from 180px */
+                top: calc(50% - 125px); /* Adjusted for new size */
+                left: calc(50% - 125px); /* Adjusted for new size */
+            }
+            .pulse-status {
+                font-size: 1.2rem; /* Increased from 1rem */
+                padding: 10px 20px; /* Increased from 8px 16px */
+                border-radius: 25px; /* Increased from 20px */
+            }
+            .pulse-title {
+                font-size: 1.3rem; /* Increased from 1.1rem */
+                top: 20px; /* Increased from 15px */
+                left: 20px; /* Increased from 15px */
+            }
+            .chat-input-container {
+                background-color: #fff;
+                border-radius: 12px;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+                border: 1px solid #e5e7eb;
+                padding: 1.5rem;
+                font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+                width: 33.2rem; /* Increased width from 500px */
+                margin-left: -8.5rem;
+            }
+            .text-input {
+                min-height: 5.5rem; /* Increased from 4.5rem */
+                max-height: 11rem; /* Increased from 9rem */
+                font-size: 1rem; /* Increased from 0.875rem */
+            }
+            .send-btn {
+                width: 2.75rem; /* Increased from 2.25rem */
+                height: 2.75rem; /* Increased from 2.25rem */
+            }
+            .char-count {
+                font-size: 0.85rem; /* Increased from 0.75rem */
+            }
+        }
+        /* Tablet styles (768px to 949px) */
+        @media (min-width: 768px) and (max-width: 949px) {
+            .container {
+                padding: 20px;
+                min-width: 615px; /* Added minimum width for tablet */
+            }
+            .header {
+                max-width: 800px;
+            }
+            .content-sections {
+                max-width: 800px;
+                height: calc(100vh - 180px); /* Default tablet height */
+                min-height: 350px; /* Added minimum height for tablet */
+                min-width: 615px; /* Added minimum width for tablet */
+            }
+            .conversations-header {
+                padding: 15px 15px 0;
+            }
+            .conversations-title {
+                font-size: 1.3rem;
+            }
+            .conversation-card {
+                min-height: 160px;
+                padding: 15px;
+            }
+            .conversation-card.expanded {
+                min-height: 450px;
+            }
+            .message-content {
+                padding: 6px 12px;
+            }
+            .conversation-card.expanded .message-content {
+                padding: 12px;
+            }
+            /* Hide vertical icons and show only menu icon in horizontal layout */
+            .header-icons-vertical {
+                display: none;
+            }
+            .header-icons {
+                display: flex;
+            }
+            /* Hide feedback and share icons on tablet */
+            .header-icons .icon:not(.menu-icon) {
+                display: none;
+            }
+            /* Hide desktop icons on tablet */
+            .desktop-icons-container {
+                display: none;
+            }
+            /* Adjust height for short tablet screens */
+            @media (max-height: 820px) {
+                .container {
+                    padding: 15px;
+                }
+                .header {
+                    margin-bottom: 15px;
+                }
+                .content-sections {
+                    height: calc(100vh - 150px);
+                    min-height: 300px;
+                }
+            }
+            @media (max-height: 600px) {
+                .container {
+                    padding: 10px;
+                }
+                .header {
+                    margin-bottom: 10px;
+                }
+                .content-sections {
+                    height: calc(100vh - 120px);
+                    min-height: 250px;
+                }
+            }
+        }
+        /* Mobile styles (below 768px) */
+        @media (max-width: 767px) {
+            .container {
+                padding: 15px;
+            }
+            .header-top {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 15px;
+            }
+            .user-info {
+                width: 100%;
+                justify-content: space-between;
+            }
+            .user-status-container {
+                width: 100%; /* On mobile, make it full width as intended */
+                margin-top: 10px;
+                justify-content: space-between;
+            }
+            .header-icons {
+                width: 100%;
+                justify-content: flex-end;
+                margin-top: 10px;
+            }
+            .header-icons-vertical {
+                display: none;
+            }
+            /* Hide feedback and share icons on mobile */
+            .header-icons .icon:not(.menu-icon) {
+                display: none;
+            }
+            .content-sections {
+                height: calc(100vh - 180px); /* Default mobile height */
+                min-height: 300px;
+            }
+            .main-content {
+                padding: 15px 10px;
+            }
+            .conversations-header {
+                padding: 15px 15px 0;
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .conversations-title {
+                font-size: 1.25rem;
+            }
+            .conversations-filter {
+                width: 100%;
+                justify-content: space-between;
+            }
+            .filter-btn {
+                flex: 1;
+                text-align: center;
+                padding: 0.5rem 0.75rem;
+            }
+            .conversation-card {
+                min-height: 140px;
+                padding: 15px;
+                margin-bottom: 1rem;
+            }
+            .conversation-card.expanded {
+                min-height: 400px;
+            }
+            .message-header {
+                flex-wrap: wrap;
+            }
+            .message-label {
+                font-size: 0.9rem;
+            }
+            .icon-container {
+                width: 2rem;
+                height: 2rem;
+            }
+            .icon-svg {
+                width: 1rem;
+                height: 1rem;
+            }
+            .message-content {
+                padding: 6px 10px;
+                height: auto;
+                min-height: 1.5rem;
+            }
+            .conversation-card.expanded .message-content {
+                padding: 10px;
+                max-height: 150px;
+            }
+            .action-icons {
+                position: relative;
+                bottom: auto;
+                right: auto;
+                margin-top: 10px;
+                justify-content: flex-end;
+            }
+            .action-icon {
+                width: 28px;
+                height: 28px;
+            }
+            .action-icon svg {
+                width: 16px;
+                height: 16px;
+            }
+            /* Hide desktop icons on mobile */
+            .desktop-icons-container {
+                display: none;
+            }
+            /* Adjust height for short mobile screens */
+            @media (max-height: 820px) {
+                .container {
+                    padding: 10px;
+                }
+                .header {
+                    margin-bottom: 10px;
+                }
+                .content-sections {
+                    height: calc(100vh - 150px);
+                    min-height: 250px;
+                }
+            }
+            @media (max-height: 600px) {
+                .container {
+                    padding: 8px;
+                }
+                .header {
+                    margin-bottom: 8px;
+                }
+                .content-sections {
+                    height: calc(100vh - 120px);
+                    min-height: 200px;
+                }
+            }
+        }
+        /* Small mobile styles (below 480px) */
+        @media (max-width: 480px) {
+            .container {
+                padding: 10px;
+            }
+            .header-top {
+                padding: 10px;
+            }
+            .logo {
+                font-size: 1.3rem;
+            }
+            .user-status-container {
+                flex-direction: column; /* Stack items vertically on very small screens */
+                gap: 5px;
+            }
+            .content-sections {
+                height: calc(100vh - 160px); /* Default small mobile height */
+                min-height: 200px;
+            }
+            .main-content {
+                padding: 10px 5px;
+            }
+            .conversations-header {
+                padding: 10px 10px 0;
+            }
+            .conversations-title {
+                font-size: 1.1rem;
+            }
+            .conversation-card {
+                padding: 10px;
+            }
+            .message-header {
+                margin-bottom: 8px;
+            }
+            .message-label {
+                font-size: 0.85rem;
+                margin-left: 8px;
+            }
+            .icon-container {
+                width: 1.75rem;
+                height: 1.75rem;
+                margin-right: 0.5rem;
+            }
+            .message-content {
+                padding: 5px 8px;
+            }
+            .conversation-card.expanded .message-content {
+                padding: 8px;
+                max-height: 120px;
+            }
+            /* Adjust height for very short mobile screens */
+            @media (max-height: 820px) {
+                .content-sections {
+                    height: calc(100vh - 140px);
+                    min-height: 180px;
+                }
+            }
+            @media (max-height: 600px) {
+                .content-sections {
+                    height: calc(100vh - 110px);
+                    min-height: 150px;
+                }
+            }
+        }
+       /* Vertical container with pulse and chat */
         .vertical-chat-container {
             margin-right: -1rem;
             position: fixed;
@@ -268,17 +955,18 @@
             flex-direction: column;
             gap: 2rem;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            overflow: visible; /* Ensure container doesn't clip content */
         }
-        
         .pulse-container {
             background-color: #f9fafb;
-            padding: 1.5rem;
+            padding: 1rem;
             position: relative;
-            height: 200px;
-            overflow: hidden;
+            height: 280px; /* Increased from 250px */
+            width: 250px;
+            overflow: visible; /* Changed from 'hidden' to 'visible' */
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+            border-radius: 12px; /* Added for better appearance */
         }
-        
         .pulse-ring {
             position: absolute;
             top: 50%;
@@ -295,7 +983,6 @@
             align-items: center;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-        
         .pulse-ring::before {
             content: '';
             position: absolute;
@@ -306,7 +993,6 @@
             animation: pulse 2s infinite;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-        
         .pulse-ring::after {
             content: '';
             position: absolute;
@@ -317,7 +1003,6 @@
             animation: pulse 2s infinite 0.5s;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-        
         .pulse-circle {
             position: absolute;
             border-radius: 50%;
@@ -325,7 +1010,6 @@
             animation: pulse 2s infinite;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-        
         .circle-1 {
             width: 100px;
             height: 100px;
@@ -334,7 +1018,6 @@
             animation-delay: 0.2s;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-        
         .circle-2 {
             width: 140px;
             height: 140px;
@@ -343,17 +1026,15 @@
             animation-delay: 0.4s;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-        
         .circle-3 {
-            width: 180px;
-            height: 180px;
-            top: calc(50% - 90px);
-            left: calc(50% - 90px);
+            width: 200px; /* Increased from 180px */
+            height: 200px; /* Increased from 180px */
+            top: calc(50% - 100px); /* Adjusted for new size */
+            left: calc(50% - 100px); /* Adjusted for new size */
             animation-delay: 0.6s;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-        
-        @keyframes pulse {
+                @keyframes pulse {
             0% {
                 transform: scale(0.8);
                 opacity: 0.8;
@@ -367,7 +1048,6 @@
                 opacity: 0;
             }
         }
-        
         .pulse-status {
             position: absolute;
             top: 50%;
@@ -383,7 +1063,6 @@
             white-space: nowrap;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-        
         .pulse-title {
             position: absolute;
             top: 15px;
@@ -394,7 +1073,6 @@
             z-index: 20;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-
         /* Chat input container */
         .chat-input-container {
             background-color: #fff;
@@ -404,49 +1082,47 @@
             padding: 1.5rem;
             font-family: 'Segoe UI', system-ui, Arial, sans-serif;
         }
-
         .input-container {
-            position: relative;
-            margin-bottom: 0.75rem;
+            position: relative; /* Keep relative positioning for the container */
+            display: flex; /* Use flexbox to stack elements */
+            flex-direction: column;
+            justify-content: space-between; /* Push button to bottom */
+            margin-bottom: 0.75rem; /* Space below the input area */
         }
-        
         .text-input {
-            width: 24rem;
+            width: 100%; /* Full width */
             background-color: #f9fafb;
             box-shadow: 0 0 0 2px #dcdcdc;
             border: 1px solid var(--border-color);
             border-radius: 0.5rem;
-            padding: 0.75rem 3.5rem 0.75rem 0.75rem;
+            padding: 0.75rem; /* Consistent padding */
             font-size: 0.875rem;
             resize: none;
             min-height: 4.5rem;
             max-height: 9rem;
             overflow-y: auto;
             line-height: 1.5;
-            padding-right: 3.5rem;
+            margin-bottom: 0.5rem; /* Space between textarea and controls */
         }
-        
         .text-input:focus {
             outline: none;
             border-color: var(--primary-color);
             box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
         }
-
+        .input-controls { /* New container for char count and send button */
+            display: flex;
+            justify-content: space-between; /* Space between char count and button */
+            align-items: center; /* Vertically center items */
+        }
         .char-count {
-            position: absolute;
-            bottom: 0.75rem;
-            right: 3.25rem;
             font-size: 0.75rem;
             color: var(--text-light);
             background-color: rgba(255, 255, 255, 0.8);
             padding: 0.125rem 0.375rem;
             border-radius: 0.25rem;
+            /* No absolute positioning */
         }
-
         .send-btn {
-            position: absolute;
-            bottom: 0.75rem;
-            right: 0.75rem;
             background-color: var(--primary-color);
             color: black;
             border: none;
@@ -458,125 +1134,144 @@
             justify-content: center;
             cursor: pointer;
             transition: background-color 0.2s;
+            /* No absolute positioning */
         }
-        
         .send-btn:hover {
             background-color: var(--primary-dark);
         }
-        
         .send-btn:disabled {
             background-color: rgba(79, 70, 229, 0.2);
             cursor: not-allowed;
         }
-
-        /* Tailwind-inspired utility classes */
-        .p-4 { padding: 1rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .rounded-lg { border-radius: 0.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .flex { display: flex; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .items-center { align-items: center; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .items-start { align-items: flex-start; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .space-x-2 > * + * { margin-left: 0.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .space-y-3 > * + * { margin-top: 0.75rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .flex-grow { flex-grow: 1; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .flex-shrink-0 { flex-shrink: 0; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .bg-gray-200 { background-color: #e5e7eb; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .text-gray-700 { color: #374151; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .p-3 { padding: 0.75rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .rounded-l { border-top-left-radius: 0.375rem; border-bottom-left-radius: 0.375rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .border { border-width: 1px; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .border-gray-300 { border-color: #d1d5db; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .focus\:outline-none:focus {
-            outline: 2px solid transparent;
-            outline-offset: 2px;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+        /* Responsive adjustments for vertical chat container on short screens */
+        @media (max-height: 820px) {
+            .vertical-chat-container {
+                width: 400px;
+                gap: 1.5rem;
+                bottom: 1rem;
+                right: 1.5rem;
+            }
+            .pulse-container {
+                height: 180px; /* Increased from 150px */
+                padding: 1.2rem;
+            }
+            .pulse-ring {
+                width: 32px;
+                height: 32px;
+            }
+            .pulse-ring::before {
+                width: 48px;
+                height: 48px;
+            }
+            .pulse-ring::after {
+                width: 64px;
+                height: 64px;
+            }
+            .circle-1 {
+                width: 80px;
+                height: 80px;
+                top: calc(50% - 40px);
+                left: calc(50% - 40px);
+            }
+            .circle-2 {
+                width: 110px;
+                height: 110px;
+                top: calc(50% - 55px);
+                left: calc(50% - 55px);
+            }
+            .circle-3 {
+                width: 160px; /* Increased from 140px */
+                height: 160px; /* Increased from 140px */
+                top: calc(50% - 80px); /* Adjusted for new size */
+                left: calc(50% - 80px); /* Adjusted for new size */
+            }
+            .pulse-status {
+                font-size: 0.9rem;
+                padding: 6px 12px;
+            }
+            .pulse-title {
+                font-size: 1rem;
+                top: 12px;
+                left: 12px;
+            }
+            .chat-input-container {
+                padding: 1.2rem;
+            }
+            .text-input {
+                min-height: 3.5rem;
+                max-height: 7rem;
+                font-size: 0.8rem;
+            }
+            .send-btn {
+                width: 2rem;
+                height: 2rem;
+            }
         }
-        .focus\:ring-2:focus {
-            box-shadow: 0 0 0 2px #818cf8;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
-        }
-        .bg-indigo-600 { background-color: #4f46e5; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .hover\:bg-indigo-700:hover { background-color: #4338ca; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .rounded-r-lg { 
-            border-top-right-radius: 0.5rem; 
-            border-bottom-right-radius: 0.5rem; 
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif; 
-        }
-        .border-indigo-700 { border-color: #4338ca; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .transition-colors {
-            transition-property: background-color, border-color, color;
-            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-            transition-duration: 150ms;
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif;
-        }
-        .h-6 { height: 1.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .w-6 { width: 1.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .h-4 { height: 1rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .w-4 { width: 1rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .w-8 { width: 2rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .h-8 { height: 2rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .justify-between { justify-content: space-between; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .mt-2 { margin-top: 0.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .mb-4 { margin-bottom: 1rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .mb-1 { margin-bottom: 0.25rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .mr-3 { margin-right: 0.75rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .text-xs { font-size: 0.75rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .text-gray-500 { color: #6b7280; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .rounded { border-radius: 0.25rem; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .bg-blue-100 { background-color: #dbeafe; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .bg-green-100 { background-color: #dcfce7; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .text-blue-700 { color: #1d4ed8; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .text-green-700 { color: #047857; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .font-semibold { font-weight: 600; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .font-bold { font-weight: 700; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        .bg-white { background-color: #ffffff; font-family: 'Segoe UI', system-ui, Arial, sans-serif; }
-        
-        /* Ensure all text in conversation cards uses the correct font */
-        .conversation-card,
-        .conversation-card * {
-            font-family: 'Segoe UI', system-ui, Arial, sans-serif !important;
-        }
-
-        /* NEW: Send icon rotation */
-        .send-icon {
-            transform: rotate(-90deg);
-            transform-origin: center;
-        }
-
-        /* NEW: Scrollable textarea styling */
-        #textInput {
-            min-height: 4.5rem;   /* ~3 lines */
-            max-height: 9rem;     /* optional cap */
-            overflow-y: auto;
-            line-height: 1.5;
-            resize: none;         /* prevent manual resizing */
-        }
-        
-        /* NEW: Centered and larger icons */
-        .icon-container {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 2.5rem;  /* Increased from 2rem */
-            height: 2.5rem; /* Increased from 2rem */
-            border-radius: 50%;
-            margin-right: 0.75rem;
-            flex-shrink: 0;
-        }
-        
-        .user-icon {
-            background-color: #dbeafe; /* blue-100 */
-            color: #1d4ed8; /* blue-700 */
-        }
-        
-        .ai-icon {
-            background-color: #dcfce7; /* green-100 */
-            color: #047857; /* green-700 */
-        }
-        
-        .icon-svg {
-            width: 1.25rem;  /* Increased from 1rem */
-            height: 1.25rem; /* Increased from 1rem */
+        @media (max-height: 600px) {
+            .vertical-chat-container {
+                width: 350px;
+                gap: 1rem;
+                bottom: 0.8rem;
+                right: 1rem;
+            }
+            .pulse-container {
+                height: 150px; /* Increased from 120px */
+                padding: 1rem;
+            }
+            .pulse-ring {
+                width: 28px;
+                height: 28px;
+            }
+            .pulse-ring::before {
+                width: 40px;
+                height: 40px;
+            }
+            .pulse-ring::after {
+                width: 52px;
+                height: 52px;
+            }
+            .circle-1 {
+                width: 60px;
+                height: 60px;
+                top: calc(50% - 30px);
+                left: calc(50% - 30px);
+            }
+            .circle-2 {
+                width: 80px;
+                height: 80px;
+                top: calc(50% - 40px);
+                left: calc(50% - 40px);
+            }
+            .circle-3 {
+                width: 120px; /* Increased from 100px */
+                height: 120px; /* Increased from 100px */
+                top: calc(50% - 60px); /* Adjusted for new size */
+                left: calc(50% - 60px); /* Adjusted for new size */
+            }
+            .pulse-status {
+                font-size: 0.8rem;
+                padding: 4px 8px;
+            }
+            .pulse-title {
+                font-size: 0.9rem;
+                top: 10px;
+                left: 10px;
+            }
+            .chat-input-container {
+                padding: 1rem;
+            }
+            .text-input {
+                min-height: 3rem;
+                max-height: 6rem;
+                font-size: 0.75rem;
+            }
+            .send-btn {
+                width: 1.8rem;
+                height: 1.8rem;
+            }
+            .char-count {
+                font-size: 0.7rem;
+            }
         }
     </style>
 </head>
@@ -586,24 +1281,28 @@
             <div class="header-top">
                 <div class="user-info">
                     <div class="logo">Porturs LTD</div>
+                    <!-- Updated user status container - now inline-flex -->
                     <div class="user-status-container">
-                        <div class="text-sm text-gray-500 bg-indigo-100 px-3 py-1 rounded-md">
-                            User: <span id="currentUserEmail">Loading...</span>
+                        <div class="user-status-item">
+                            <span class="text-sm text-gray-500">User:</span>
+                            <span id="currentUserEmail" class="text-sm">Loading...</span>
                         </div>
-                        <div class="text-sm text-gray-500 bg-indigo-100 px-3 py-1 rounded-md">
-                            Status: <span id="connectionStatus" class="text-yellow-600">Connecting...</span>
+                        <div class="user-status-item">
+                            <span class="text-sm text-gray-500">Status:</span>
+                            <span id="connectionStatus" class="text-sm text-yellow-600">Connecting...</span>
                         </div>
                     </div>
                 </div>
+                <!-- Horizontal icons (for tablet and mobile) -->
                 <div class="header-icons">
                     <div class="icon menu-icon">≡</div>
                     <div class="icon" title="Feedback">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg xmlns="http://www.w3.org/2000/svg  " width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
                         </svg>
                     </div>
                     <div class="icon" title="Share">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg xmlns="http://www.w3.org/2000/svg  " width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
                             <polyline points="16 6 12 2 8 6"></polyline>
                             <line x1="12" y1="2" x2="12" y2="15"></line>
@@ -612,24 +1311,36 @@
                 </div>
             </div>
         </div>
-        
         <div class="content-sections">
-            
             <div class="conversations-header">
                 <h2 class="conversations-title">Conversations</h2>
                 <div class="conversations-filter">
-                    <button class="filter-btn active">All</button>
-                    <button class="filter-btn">Recent</button>
-                    <button class="filter-btn">Starred</button>
+                    <button class="filter-btn" data-filter="all">All</button>
+                    <button class="filter-btn" data-filter="recent">Recent</button>
+                    <button class="filter-btn" data-filter="starred">Starred</button>
                 </div>
             </div>
-
             <div class="main-content">
                 <!-- Conversation cards will be dynamically inserted here -->
             </div>
         </div>
     </div>
-
+    <!-- Desktop icons container -->
+    <div class="desktop-icons-container">
+        <div class="icon menu-icon">≡</div>
+        <div class="icon" title="Feedback">
+            <svg xmlns="http://www.w3.org/2000/svg  " width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+            </svg>
+        </div>
+        <div class="icon" title="Share">
+            <svg xmlns="http://www.w3.org/2000/svg  " width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                <polyline points="16 6 12 2 8 6"></polyline>
+                <line x1="12" y1="2" x2="12" y2="15"></line>
+            </svg>
+        </div>
+    </div>
     <!-- Vertical container with pulse and chat -->
     <div class="vertical-chat-container">
         <!-- Pulse container -->
@@ -639,24 +1350,20 @@
             <div class="pulse-circle circle-3"></div>
             <div class="pulse-ring"></div>
         </div>
-        
         <!-- Chat input container -->
         <div class="chat-input-container">
-
             <div class="p-2 rounded-lg border border-gray-200 shadow-sm">
-
-
                 <div class="input-container">
                     <textarea class="text-input" id="textInput" placeholder="Type your message here..."></textarea>
-                    <div class="char-count" id="charCount">0/500</div>
-                    <button class="send-btn" id="sendTextBtn" disabled>
-                        <svg xmlns="http://www.w3.org/2000/svg" class="send-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                        </svg>
-                    </button>
+                    <div class="input-controls">
+                        <div class="char-count" id="charCount">0/500</div>
+                        <button class="send-btn" id="sendTextBtn" disabled>
+                            <svg xmlns="http://www.w3.org/2000/svg  " class="send-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V5m0 0l-7 7m7-7l7 7" />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
-
-
                 <div class="flex justify-between items-center mt-2 text-xs text-gray-500">
                     <div>
                         Models: <span id="modelStatus" class="text-yellow-600">Loading...</span>
@@ -669,59 +1376,36 @@
             </div>
         </div>
     </div>
-
     <script>
-        const conversations = [
+        let conversations = [
             {
                 id: 1,
                 date: "2023-10-15 14:30",
-                user_message: "Hello, can you help me with my project?",
-                ai_message: "Of course! I'd be happy to help. What kind of project are you working on?"
+                user_message: "Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water sources to run dry at every turn.",
+                ai_message: "That a really amazing story, thank you. Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water so. Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water so. Benjamin Sinzore.",
+                starred: true
             },
             {
                 id: 2,
                 date: "2023-10-15 15:45",
-                user_message: "I need to create a responsive website layout.",
-                ai_message: "Great! I can assist with that. Are you using CSS frameworks like Bootstrap or Tailwind, or are you writing custom CSS?"
+                user_message: "Tell me a long bed-time story",
+                ai_message: "Once upon a time, in the magical kingdom of Eldoria, there was an enchanted forest filled with tall trees and sparkling streams. The villagers who lived nearby would often gather at the edge of the forest to listen to stories told by the wisest creatures. One evening, as the sun began its descent into the horizon, a gentle breeze whispered secrets through the leaves of the ancient trees. In this peaceful scene stood an old owl named Zephyr, who had been watching over Eldoria for many years",
+                starred: false
             },
             {
                 id: 3,
                 date: "2023-10-16 09:20",
-                user_message: "I'm using Tailwind CSS. Can you show me an example of a card component?",
-                ai_message: "Certainly! Here's an example of a card component using Tailwind CSS: <div class='bg-white rounded-lg shadow-md p-6'>Card content</div>"
-            },
-            {
-                id: 4,
-                date: "2023-10-16 11:15",
-                user_message: "How do I center a div?",
-                ai_message: "You can center a div using flexbox: display: flex; justify-content: center; align-items: center;"
-            },
-            {
-                id: 5,
-                date: "2023-10-17 13:40",
-                user_message: "What's the difference between let and const?",
-                ai_message: "let allows reassignment, while const creates a constant reference that cannot be reassigned."
-            },
-            {
-                id: 6,
-                date: "2023-10-18 10:30",
-                user_message: "Can you explain async/await in JavaScript?",
-                ai_message: "Async/await is syntactic sugar for promises that makes asynchronous code easier to write and read. The async keyword is used to declare an asynchronous function, and await is used to wait for a promise to resolve."
-            },
-            {
-                id: 7,
-                date: "2023-10-19 16:45",
-                user_message: "How do I handle errors in async functions?",
-                ai_message: "You can use try/catch blocks inside async functions to handle errors. Any rejected promise inside the try block will be caught by the catch block."
+                user_message: "Can you explain quantum computing in simple terms?",
+                ai_message: "Quantum computing is a type of computation that harnesses the collective properties of quantum states, such as superposition, interference, and entanglement, to perform calculations. The devices that perform quantum computations are known as quantum computers. They are believed to be able to solve certain computational problems, such as integer factorization (which underlies RSA encryption), substantially faster than classical computers.",
+                starred: true
             }
         ];
-
+        let currentFilter = localStorage.getItem('conversationFilter') || 'all';
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
-
         function formatDate(dateString) {
             const date = new Date(dateString);
             return date.toLocaleDateString('en-US', { 
@@ -732,125 +1416,171 @@
                 minute: '2-digit'
             });
         }
-
-        function renderConversations() {
+        const MAX_PREVIEW_LENGTH = 80;
+        function getPreviewText(text) {
+            const firstSentenceMatch = text.match(/^[^.!?]*[.!?](?=\s|$)|^[^.!?]+/);
+            let firstSentence = firstSentenceMatch ? firstSentenceMatch[0] : text;
+            if (firstSentence.length <= MAX_PREVIEW_LENGTH) {
+                return firstSentence;
+            } else {
+                return firstSentence.substring(0, MAX_PREVIEW_LENGTH).trim() + '…';
+            }
+        }
+        function renderConversations(filter = currentFilter) {
             const mainContent = document.querySelector('.main-content');
             mainContent.innerHTML = '';
-            
-            conversations.forEach(conv => {
+            let filteredConvs = conversations;
+            if (filter === 'starred') {
+                filteredConvs = conversations.filter(c => c.starred);
+            } else if (filter === 'recent') {
+                const now = new Date();
+                const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                filteredConvs = conversations.filter(c => new Date(c.date) > yesterday);
+            }
+            if (filteredConvs.length === 0) {
+                let message = '';
+                let emoji = '';
+                switch(filter) {
+                    case 'starred':
+                        message = 'No starred conversations yet';
+                        emoji = '⭐';
+                        break;
+                    case 'recent':
+                        message = 'No recent conversations';
+                        emoji = '🕒';
+                        break;
+                    default:
+                        message = 'No conversations yet';
+                        emoji = '💬';
+                }
+                const emptyState = document.createElement('div');
+                emptyState.style.cssText = `
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    height: 300px;
+                    text-align: center;
+                    color: #6b7280;
+                `;
+                emptyState.innerHTML = `
+                    <div style="font-size: 4rem; margin-bottom: 1rem;">${emoji}</div>
+                    <div style="font-size: 1.25rem; font-weight: 500; margin-bottom: 0.5rem;">${message}</div>
+                    <div style="font-size: 0.875rem;">Start a new conversation to see it here</div>
+                `;
+                mainContent.appendChild(emptyState);
+                return;
+            }
+            filteredConvs.forEach(conv => {
+                const fullUser = escapeHtml(conv.user_message);
+                const fullAi = escapeHtml(conv.ai_message);
+                const previewUser = escapeHtml(getPreviewText(conv.user_message));
+                const previewAi = escapeHtml(getPreviewText(conv.ai_message));
                 const card = document.createElement('div');
                 card.className = 'conversation-card';
-                
+                card.dataset.fullUser = fullUser;
+                card.dataset.fullAi = fullAi;
+                card.dataset.previewUser = previewUser;
+                card.dataset.previewAi = previewAi;
+                card.dataset.id = conv.id;
+                const isStarred = conv.starred;
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-4">
                         <div class="text-sm text-gray-500">${formatDate(conv.date)}</div>
                         <div class="text-xs bg-gray-100 px-2 py-1 rounded">Conversation #${conv.id}</div>
                     </div>
-                    <div class="space-y-3">
-                        <div class="flex items-start">
-                            <div class="icon-container user-icon">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
-                                </svg>
+                    <div class="conversation-sections">
+                        <div class="message-section user-section">
+                            <div class="message-header">
+                                <div class="icon-container user-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg  " class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
+                                    </svg>
+                                </div>
+                                <div class="text-blue-700 font-semibold message-label">User:</div>
                             </div>
-                            <div class="flex-1">
-                                <div class="text-blue-700 font-semibold mb-1">User:</div>
-                                <div class="text-gray-700 bg-gray-50 p-3 rounded">${escapeHtml(conv.user_message)}</div>
+                            <div class="message-content">
+                                <div class="message-text">${previewUser}</div>
                             </div>
                         </div>
-                        <div class="flex items-start">
-                            <div class="icon-container ai-icon">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                                </svg>
+                        <div class="message-section ai-section">
+                            <div class="message-header">
+                                <div class="icon-container ai-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg  " class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                    </svg>
+                                </div>
+                                <div class="text-green-700 font-semibold message-label">AI Companion:</div>
                             </div>
-                            <div class="flex-1">
-                                <div class="text-green-700 font-semibold mb-1">AI Companion:</div>
-                                <div class="text-gray-700 bg-gray-50 p-3 rounded">${escapeHtml(conv.ai_message)}</div>
+                            <div class="message-content">
+                                <div class="message-text">${previewAi}</div>
                             </div>
                         </div>
                     </div>
+                    <div class="action-icons">
+                        <div class="action-icon star-icon ${isStarred ? 'active' : ''}" data-id="${conv.id}">
+                            <svg xmlns="http://www.w3.org/2000/svg  " viewBox="0 0 24 24" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <div class="action-icon expand-icon" data-id="${conv.id}">
+                            <svg xmlns="http://www.w3.org/2000/svg  " viewBox="0 0 24 24" fill="currentColor">
+                                <path fill-rule="evenodd" d="M15 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.56l-3.97 3.97a.75.75 0 11-1.06-1.06l3.97-3.97h-2.69a.75.75 0 01-.75-.75zm-12 0A.75.75 0 013.75 3h4.5a.75.75 0 010 1.5H5.56l3.97 3.97a.75.75 0 01-1.06 1.06L4.5 5.56v2.69a.75.75 0 01-1.5 0v-4.5zm11.47 14.78a.75.75 0 111.06-1.06l3.97 3.97v-2.69a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5a.75.75 0 010-1.5h4.5a.75.75 0 010 1.5h-2.69l-3.97-3.97zm-4.94-1.06a.75.75 0 010 1.06L5.56 19.5h2.69a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75v-4.5a.75.75 0 011.5 0v2.69l3.97-3.97a.75.75 0 011.06 0z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                    </div>
                 `;
-                
                 mainContent.appendChild(card);
             });
+            document.querySelectorAll('.star-icon').forEach(icon => {
+                icon.addEventListener('click', function() {
+                    const id = parseInt(this.getAttribute('data-id'), 10);
+                    const conv = conversations.find(c => c.id === id);
+                    if (conv) {
+                        conv.starred = !conv.starred;
+                        this.classList.toggle('active');
+                    }
+                    renderConversations(currentFilter);
+                });
+            });
+            document.querySelectorAll('.expand-icon').forEach(icon => {
+                icon.addEventListener('click', function() {
+                    const id = this.getAttribute('data-id');
+                    const card = this.closest('.conversation-card');
+                    const isExpanded = card.classList.contains('expanded');
+                    card.classList.toggle('expanded');
+                    const userContent = card.querySelector('.user-section .message-text');
+                    const aiContent = card.querySelector('.ai-section .message-text');
+                    if (!isExpanded) {
+                        userContent.innerHTML = card.dataset.fullUser;
+                        aiContent.innerHTML = card.dataset.fullAi;
+                        this.querySelector('svg').innerHTML = `<path fill-rule="evenodd" d="M4.5 12a.75.75 0 01.75-.75h13.5a.75.75 0 010 1.5H5.25a.75.75 0 01-.75-.75z" clip-rule="evenodd" />`;
+                    } else {
+                        userContent.innerHTML = card.dataset.previewUser;
+                        aiContent.innerHTML = card.dataset.previewAi;
+                        this.querySelector('svg').innerHTML = `<path fill-rule="evenodd" d="M15 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.56l-3.97 3.97a.75.75 0 11-1.06-1.06l3.97-3.97h-2.69a.75.75 0 01-.75-.75zm-12 0A.75.75 0 013.75 3h4.5a.75.75 0 010 1.5H5.56l3.97 3.97a.75.75 0 01-1.06 1.06L4.5 5.56v2.69a.75.75 0 01-1.5 0v-4.5zm11.47 14.78a.75.75 0 111.06-1.06l3.97 3.97v-2.69a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5a.75.75 0 010-1.5h4.5a.75.75 0 010 1.5h-2.69l-3.97-3.97zm-4.94-1.06a.75.75 0 010 1.06L5.56 19.5h2.69a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75v-4.5a.75.75 0 011.5 0v2.69l3.97-3.97a.75.75 0 011.06 0z" clip-rule="evenodd" />`;
+                    }
+                });
+            });
         }
-
-        // Simulate status changes
-        setTimeout(() => {
-            document.getElementById('currentUserEmail').textContent = 'user@example.com';
-        }, 1000);
-        
-        setTimeout(() => {
-            document.getElementById('connectionStatus').textContent = 'Connected';
-            document.getElementById('connectionStatus').classList.remove('text-yellow-600');
-            document.getElementById('connectionStatus').classList.add('text-green-600');
-        }, 2000);
-        
-        setTimeout(() => {
-            document.getElementById('modelStatus').textContent = 'Ready';
-            document.getElementById('modelStatus').classList.remove('text-yellow-600');
-            document.getElementById('modelStatus').classList.add('text-green-600');
-        }, 1500);
-        
-        document.getElementById('sendTextBtn').addEventListener('click', function() {
-            const input = document.getElementById('textInput');
-            if (input.value.trim() !== '') {
-                alert('Message sent: ' + input.value);
-                input.value = '';
-                
-                // Briefly change pulse status when sending
-                const pulseStatus = document.querySelector('.pulse-status');
-                const originalStatus = pulseStatus ? pulseStatus.textContent : 'Ready';
-                if (pulseStatus) {
-                    pulseStatus.textContent = 'Processing...';
-                    setTimeout(() => {
-                        pulseStatus.textContent = originalStatus;
-                    }, 1500);
+        document.addEventListener('DOMContentLoaded', () => {
+            const filterButtons = document.querySelectorAll('.filter-btn');
+            filterButtons.forEach(btn => {
+                const filter = btn.getAttribute('data-filter');
+                if (filter === currentFilter) {
+                    btn.classList.add('active');
                 }
-            }
-        });
-        
-        document.getElementById('textInput').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault(); // Prevent newline
-                document.getElementById('sendTextBtn').click();
-            }
-        });
-
-        document.addEventListener('DOMContentLoaded', renderConversations);
-
-
-
-        const textInput = document.getElementById('textInput');
-        const charCount = document.getElementById('charCount');
-        const sendButton = document.getElementById('sendTextBtn');
-        const sendIcon = document.querySelector('.send-icon'); // Select the send icon
-
-        textInput.addEventListener('input', function() {
-            const currentLength = this.value.length;
-            const maxLength = 500;
-            charCount.textContent = `${currentLength}/${maxLength}`;
-            
-            // Enable/disable send button based on content
-            if (currentLength > 0 && currentLength <= maxLength) {
-                sendButton.disabled = false;
-                sendButton.style.backgroundColor = '#4f46e5'; // indigo-600
-                sendButton.style.cursor = 'pointer';
-                sendIcon.style.color = '#ffffff'; // Set icon color to white
-            } else {
-                sendButton.disabled = true;
-                sendButton.style.backgroundColor = 'rgba(79, 70, 229, 0.2)'; // indigo-600 with opacity-20
-                sendButton.style.cursor = 'not-allowed';
-                sendIcon.style.color = ''; // Reset to default color
-            }
-            
-            // Optional: Change color when approaching limit
-            if (currentLength > 450) {
-                charCount.style.color = '#ef4444'; // red-500
-            } else {
-                charCount.style.color = ''; // reset to default
-            }
+            });
+            filterButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    filterButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentFilter = btn.getAttribute('data-filter');
+                    localStorage.setItem('conversationFilter', currentFilter);
+                    renderConversations(currentFilter);
+                });
+            });
+            renderConversations(currentFilter);
         });
     </script>
 </body>
