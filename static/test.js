@@ -1,293 +1,557 @@
+let conversations = [
+    {
+        id: 1,
+        date: "2023-10-15 14:30",
+        user_message: "Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water sources to run dry at every turn.",
+        ai_message: "That a really amazing story, thank you. Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water so. Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water so. Benjamin Sinzore.",
+        starred: true
+    },
+    {
+        id: 2,
+        date: "2023-10-15 15:45",
+        user_message: "Tell me a long bed-time story",
+        ai_message: "Once upon a time, in the magical kingdom of Eldoria, there was an enchanted forest filled with tall trees and sparkling streams. The villagers who lived nearby would often gather at the edge of the forest to listen to stories told by the wisest creatures. One evening, as the sun began its descent into the horizon, a gentle breeze whispered secrets through the leaves of the ancient trees. In this peaceful scene stood an old owl named Zephyr, who had been watching over Eldoria for many years",
+        starred: false
+    },
+    {
+        id: 3,
+        date: "2023-10-16 09:20",
+        user_message: "Can you explain quantum computing in simple terms?",
+        ai_message: "Quantum computing is a type of computation that harnesses the collective properties of quantum states, such as superposition, interference, and entanglement, to perform calculations. The devices that perform quantum computations are known as quantum computers. They are believed to be able to solve certain computational problems, such as integer factorization (which underlies RSA encryption), substantially faster than classical computers.",
+        starred: true
+    }
+];
+let currentFilter = localStorage.getItem('conversationFilter') || 'all';
 
-        let conversations = [
-            {
-                id: 1,
-                date: "2023-10-15 14:30",
-                user_message: "Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water sources to run dry at every turn.",
-                ai_message: "That a really amazing story, thank you. Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water so. Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water so. Benjamin Sinzore.",
-                starred: true
-            },
-            {
-                id: 2,
-                date: "2023-10-15 15:45",
-                user_message: "Tell me a long bed-time story",
-                ai_message: "Once upon a time, in the magical kingdom of Eldoria, there was an enchanted forest filled with tall trees and sparkling streams. The villagers who lived nearby would often gather at the edge of the forest to listen to stories told by the wisest creatures. One evening, as the sun began its descent into the horizon, a gentle breeze whispered secrets through the leaves of the ancient trees. In this peaceful scene stood an old owl named Zephyr, who had been watching over Eldoria for many years",
-                starred: false
-            },
-            {
-                id: 3,
-                date: "2023-10-16 09:20",
-                user_message: "Can you explain quantum computing in simple terms?",
-                ai_message: "Quantum computing is a type of computation that harnesses the collective properties of quantum states, such as superposition, interference, and entanglement, to perform calculations. The devices that perform quantum computations are known as quantum computers. They are believed to be able to solve certain computational problems, such as integer factorization (which underlies RSA encryption), substantially faster than classical computers.",
-                starred: true
-            }
-        ];
-        let currentFilter = localStorage.getItem('conversationFilter') || 'all';
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+const MAX_PREVIEW_LENGTH = 80;
+
+function getPreviewText(text) {
+    const firstSentenceMatch = text.match(/^[^.!?]*[.!?](?=\s|$)|^[^.!?]+/);
+    let firstSentence = firstSentenceMatch ? firstSentenceMatch[0] : text;
+    if (firstSentence.length <= MAX_PREVIEW_LENGTH) {
+        return firstSentence;
+    } else {
+        return firstSentence.substring(0, MAX_PREVIEW_LENGTH).trim() + '…';
+    }
+}
+
+function renderConversations(filter = currentFilter) {
+    const mainContent = document.querySelector('.main-content');
+    mainContent.innerHTML = '';
+    
+    let filteredConvs = conversations;
+    if (filter === 'starred') {
+        filteredConvs = conversations.filter(c => c.starred);
+    } else if (filter === 'recent') {
+        const now = new Date();
+        const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        filteredConvs = conversations.filter(c => new Date(c.date) > yesterday);
+    }
+    
+    if (filteredConvs.length === 0) {
+        let message = '';
+        let emoji = '';
+        switch(filter) {
+            case 'starred':
+                message = 'No starred conversations yet';
+                emoji = '⭐';
+                break;
+            case 'recent':
+                message = 'No recent conversations';
+                emoji = '🕒';
+                break;
+            default:
+                message = 'No conversations yet';
+                emoji = '💬';
         }
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('en-US', { 
-                year: 'numeric', 
-                month: 'short', 
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        }
-        const MAX_PREVIEW_LENGTH = 80;
-        function getPreviewText(text) {
-            const firstSentenceMatch = text.match(/^[^.!?]*[.!?](?=\s|$)|^[^.!?]+/);
-            let firstSentence = firstSentenceMatch ? firstSentenceMatch[0] : text;
-            if (firstSentence.length <= MAX_PREVIEW_LENGTH) {
-                return firstSentence;
-            } else {
-                return firstSentence.substring(0, MAX_PREVIEW_LENGTH).trim() + '…';
-            }
-        }
-        function renderConversations(filter = currentFilter) {
-            const mainContent = document.querySelector('.main-content');
-            mainContent.innerHTML = '';
-            let filteredConvs = conversations;
-            if (filter === 'starred') {
-                filteredConvs = conversations.filter(c => c.starred);
-            } else if (filter === 'recent') {
-                const now = new Date();
-                const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                filteredConvs = conversations.filter(c => new Date(c.date) > yesterday);
-            }
-            if (filteredConvs.length === 0) {
-                let message = '';
-                let emoji = '';
-                switch(filter) {
-                    case 'starred':
-                        message = 'No starred conversations yet';
-                        emoji = '⭐';
-                        break;
-                    case 'recent':
-                        message = 'No recent conversations';
-                        emoji = '🕒';
-                        break;
-                    default:
-                        message = 'No conversations yet';
-                        emoji = '💬';
-                }
-                const emptyState = document.createElement('div');
-                emptyState.style.cssText = `
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    height: 300px;
-                    text-align: center;
-                    color: #6b7280;
-                `;
-                emptyState.innerHTML = `
-                    <div style="font-size: 4rem; margin-bottom: 1rem;">${emoji}</div>
-                    <div style="font-size: 1.25rem; font-weight: 500; margin-bottom: 0.5rem;">${message}</div>
-                    <div style="font-size: 0.875rem;">Start a new conversation to see it here</div>
-                `;
-                mainContent.appendChild(emptyState);
-                return;
-            }
-            filteredConvs.forEach(conv => {
-                const fullUser = escapeHtml(conv.user_message);
-                const fullAi = escapeHtml(conv.ai_message);
-                const previewUser = escapeHtml(getPreviewText(conv.user_message));
-                const previewAi = escapeHtml(getPreviewText(conv.ai_message));
-                const card = document.createElement('div');
-                card.className = 'conversation-card';
-                card.dataset.fullUser = fullUser;
-                card.dataset.fullAi = fullAi;
-                card.dataset.previewUser = previewUser;
-                card.dataset.previewAi = previewAi;
-                card.dataset.id = conv.id;
-                const isStarred = conv.starred;
-                card.innerHTML = `
-                    <div class="flex justify-between items-start mb-4">
-                        <div class="text-sm text-gray-500">${formatDate(conv.date)}</div>
-                        <div class="text-xs bg-gray-100 px-2 py-1 rounded">Conversation #${conv.id}</div>
-                    </div>
-                    <div class="conversation-sections">
-                        <div class="message-section user-section">
-                            <div class="message-header">
-                                <div class="icon-container user-icon">
-                                    <svg xmlns="http://www.w3.org/2000/svg  " class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
-                                    </svg>
-                                </div>
-                                <div class="text-blue-700 font-semibold message-label">User:</div>
-                            </div>
-                            <div class="message-content">
-                                <div class="message-text">${previewUser}</div>
-                            </div>
-                        </div>
-                        <div class="message-section ai-section">
-                            <div class="message-header">
-                                <div class="icon-container ai-icon">
-                                    <svg xmlns="http://www.w3.org/2000/svg  " class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                                    </svg>
-                                </div>
-                                <div class="text-green-700 font-semibold message-label">AI Companion:</div>
-                            </div>
-                            <div class="message-content">
-                                <div class="message-text">${previewAi}</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="action-icons">
-                        <div class="action-icon star-icon ${isStarred ? 'active' : ''}" data-id="${conv.id}">
-                            <svg xmlns="http://www.w3.org/2000/svg  " viewBox="0 0 24 24" fill="currentColor">
-                                <path fill-rule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clip-rule="evenodd" />
+        
+        const emptyState = document.createElement('div');
+        emptyState.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 300px;
+            text-align: center;
+            color: #6b7280;
+        `;
+        emptyState.innerHTML = `
+            <div style="font-size: 4rem; margin-bottom: 1rem;">${emoji}</div>
+            <div style="font-size: 1.25rem; font-weight: 500; margin-bottom: 0.5rem;">${message}</div>
+            <div style="font-size: 0.875rem;">Start a new conversation to see it here</div>
+        `;
+        mainContent.appendChild(emptyState);
+        return;
+    }
+    
+    filteredConvs.forEach(conv => {
+        const fullUser = escapeHtml(conv.user_message);
+        const fullAi = escapeHtml(conv.ai_message);
+        const previewUser = escapeHtml(getPreviewText(conv.user_message));
+        const previewAi = escapeHtml(getPreviewText(conv.ai_message));
+        
+        const card = document.createElement('div');
+        card.className = 'conversation-card';
+        card.dataset.fullUser = fullUser;
+        card.dataset.fullAi = fullAi;
+        card.dataset.previewUser = previewUser;
+        card.dataset.previewAi = previewAi;
+        card.dataset.id = conv.id;
+        
+        const isStarred = conv.starred;
+        
+        card.innerHTML = `
+            <div class="flex justify-between items-start mb-4">
+                <div class="text-sm text-gray-500">${formatDate(conv.date)}</div>
+                <div class="text-xs bg-gray-100 px-2 py-1 rounded">Conversation #${conv.id}</div>
+            </div>
+            <div class="conversation-sections">
+                <div class="message-section user-section">
+                    <div class="message-header">
+                        <div class="icon-container user-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
                             </svg>
                         </div>
-                        <div class="action-icon expand-icon" data-id="${conv.id}">
-                            <svg xmlns="http://www.w3.org/2000/svg  " viewBox="0 0 24 24" fill="currentColor">
-                                <path fill-rule="evenodd" d="M15 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.56l-3.97 3.97a.75.75 0 11-1.06-1.06l3.97-3.97h-2.69a.75.75 0 01-.75-.75zm-12 0A.75.75 0 013.75 3h4.5a.75.75 0 010 1.5H5.56l3.97 3.97a.75.75 0 01-1.06 1.06L4.5 5.56v2.69a.75.75 0 01-1.5 0v-4.5zm11.47 14.78a.75.75 0 111.06-1.06l3.97 3.97v-2.69a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5a.75.75 0 010-1.5h4.5a.75.75 0 010 1.5h-2.69l-3.97-3.97zm-4.94-1.06a.75.75 0 010 1.06L5.56 19.5h2.69a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75v-4.5a.75.75 0 011.5 0v2.69l3.97-3.97a.75.75 0 011.06 0z" clip-rule="evenodd" />
+                        <div class="text-blue-700 font-semibold message-label">User:</div>
+                    </div>
+                    <div class="message-content">
+                        <div class="message-text">${previewUser}</div>
+                    </div>
+                </div>
+                <div class="message-section ai-section">
+                    <div class="message-header">
+                        <div class="icon-container ai-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="icon-svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
                             </svg>
                         </div>
+                        <div class="text-green-700 font-semibold message-label">AI Companion:</div>
                     </div>
-                `;
-                mainContent.appendChild(card);
-            });
-            document.querySelectorAll('.star-icon').forEach(icon => {
-                icon.addEventListener('click', function() {
-                    const id = parseInt(this.getAttribute('data-id'), 10);
-                    const conv = conversations.find(c => c.id === id);
-                    if (conv) {
-                        conv.starred = !conv.starred;
-                        this.classList.toggle('active');
-                    }
-                    renderConversations(currentFilter);
-                });
-            });
-            document.querySelectorAll('.expand-icon').forEach(icon => {
-                icon.addEventListener('click', function() {
-                    const id = this.getAttribute('data-id');
-                    const card = this.closest('.conversation-card');
-                    const isExpanded = card.classList.contains('expanded');
-                    card.classList.toggle('expanded');
-                    const userContent = card.querySelector('.user-section .message-text');
-                    const aiContent = card.querySelector('.ai-section .message-text');
-                    if (!isExpanded) {
-                        userContent.innerHTML = card.dataset.fullUser;
-                        aiContent.innerHTML = card.dataset.fullAi;
-                        this.querySelector('svg').innerHTML = `<path fill-rule="evenodd" d="M4.5 12a.75.75 0 01.75-.75h13.5a.75.75 0 010 1.5H5.25a.75.75 0 01-.75-.75z" clip-rule="evenodd" />`;
-                    } else {
-                        userContent.innerHTML = card.dataset.previewUser;
-                        aiContent.innerHTML = card.dataset.previewAi;
-                        this.querySelector('svg').innerHTML = `<path fill-rule="evenodd" d="M15 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.56l-3.97 3.97a.75.75 0 11-1.06-1.06l3.97-3.97h-2.69a.75.75 0 01-.75-.75zm-12 0A.75.75 0 013.75 3h4.5a.75.75 0 010 1.5H5.56l3.97 3.97a.75.75 0 01-1.06 1.06L4.5 5.56v2.69a.75.75 0 01-1.5 0v-4.5zm11.47 14.78a.75.75 0 111.06-1.06l3.97 3.97v-2.69a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5a.75.75 0 010-1.5h4.5a.75.75 0 010 1.5h-2.69l-3.97-3.97zm-4.94-1.06a.75.75 0 010 1.06L5.56 19.5h2.69a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75v-4.5a.75.75 0 011.5 0v2.69l3.97-3.97a.75.75 0 011.06 0z" clip-rule="evenodd" />`;
-                    }
-                });
-            });
-        }
-        document.addEventListener('DOMContentLoaded', () => {
-            const filterButtons = document.querySelectorAll('.filter-btn');
-            filterButtons.forEach(btn => {
-                const filter = btn.getAttribute('data-filter');
-                if (filter === currentFilter) {
-                    btn.classList.add('active');
-                }
-            });
-            filterButtons.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    filterButtons.forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    currentFilter = btn.getAttribute('data-filter');
-                    localStorage.setItem('conversationFilter', currentFilter);
-                    renderConversations(currentFilter);
-                });
-            });
+                    <div class="message-content">
+                        <div class="message-text">${previewAi}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="action-icons">
+                <div class="action-icon star-icon ${isStarred ? 'active' : ''}" data-id="${conv.id}">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="action-icon expand-icon" data-id="${conv.id}">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path fill-rule="evenodd" d="M15 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.56l-3.97 3.97a.75.75 0 11-1.06-1.06l3.97-3.97h-2.69a.75.75 0 01-.75-.75zm-12 0A.75.75 0 013.75 3h4.5a.75.75 0 010 1.5H5.56l3.97 3.97a.75.75 0 01-1.06 1.06L4.5 5.56v2.69a.75.75 0 01-1.5 0v-4.5zm11.47 14.78a.75.75 0 111.06-1.06l3.97 3.97v-2.69a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5a.75.75 0 010-1.5h4.5a.75.75 0 010 1.5h-2.69l-3.97-3.97zm-4.94-1.06a.75.75 0 010 1.06L5.56 19.5h2.69a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75v-4.5a.75.75 0 011.5 0v2.69l3.97-3.97a.75.75 0 011.06 0z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+            </div>
+        `;
+        
+        mainContent.appendChild(card);
+    });
+    
+    document.querySelectorAll('.star-icon').forEach(icon => {
+        icon.addEventListener('click', function() {
+            const id = parseInt(this.getAttribute('data-id'), 10);
+            const conv = conversations.find(c => c.id === id);
+            if (conv) {
+                conv.starred = !conv.starred;
+                this.classList.toggle('active');
+            }
             renderConversations(currentFilter);
         });
+    });
+    
+    document.querySelectorAll('.expand-icon').forEach(icon => {
+        icon.addEventListener('click', function() {
+            const id = this.getAttribute('data-id');
+            const card = this.closest('.conversation-card');
+            const isExpanded = card.classList.contains('expanded');
+            
+            card.classList.toggle('expanded');
+            const userContent = card.querySelector('.user-section .message-text');
+            const aiContent = card.querySelector('.ai-section .message-text');
+            
+            if (!isExpanded) {
+                userContent.innerHTML = card.dataset.fullUser;
+                aiContent.innerHTML = card.dataset.fullAi;
+                this.querySelector('svg').innerHTML = `<path fill-rule="evenodd" d="M4.5 12a.75.75 0 01.75-.75h13.5a.75.75 0 010 1.5H5.25a.75.75 0 01-.75-.75z" clip-rule="evenodd" />`;
+            } else {
+                userContent.innerHTML = card.dataset.previewUser;
+                aiContent.innerHTML = card.dataset.previewAi;
+                this.querySelector('svg').innerHTML = `<path fill-rule="evenodd" d="M15 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.56l-3.97 3.97a.75.75 0 11-1.06-1.06l3.97-3.97h-2.69a.75.75 0 01-.75-.75zm-12 0A.75.75 0 013.75 3h4.5a.75.75 0 010 1.5H5.56l3.97 3.97a.75.75 0 01-1.06 1.06L4.5 5.56v2.69a.75.75 0 01-1.5 0v-4.5zm11.47 14.78a.75.75 0 111.06-1.06l3.97 3.97v-2.69a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5a.75.75 0 010-1.5h4.5a.75.75 0 010 1.5h-2.69l-3.97-3.97zm-4.94-1.06a.75.75 0 010 1.06L5.56 19.5h2.69a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75v-4.5a.75.75 0 011.5 0v2.69l3.97-3.97a.75.75 0 011.06 0z" clip-rule="evenodd" />`;
+            }
+        });
+    });
+}
 
+// Model Status Management
+let modelStatus = 'unknown'; // unknown, connected, disconnected, error, loading
+let ws = null;
+let statusCheckInterval = null;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Get session token from cookie
-  function getCookie(name) {
+function getCookie(name) {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
     if (parts.length === 2) return parts.pop().split(';').shift();
-  }
+}
 
-  const sessionToken = getCookie('session_token');
-  const wsUrl = sessionToken 
-    ? `ws://localhost:8000/ws?session_token=${encodeURIComponent(sessionToken)}`
-    : 'ws://localhost:8000/ws';
-
-  const ws = new WebSocket(wsUrl);
-
-  const statusEl = document.getElementById('connectionStatus');
-  const emailEl = document.getElementById('currentUserEmail');
-
-  ws.onopen = () => {
-    statusEl.textContent = 'Connected';
-    statusEl.className = 'text-sm text-green-500';
-  };
-
-  ws.onclose = () => {
-    statusEl.textContent = 'Disconnected';
-    statusEl.className = 'text-sm text-red-500';
-  };
-
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-    statusEl.textContent = 'Error';
-    statusEl.className = 'text-sm text-red-400';
-  };
-
-  // Optional: listen for welcome message to confirm identity
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    if (data.type === 'test_response' && data.user_id) {
-      // Already set via Jinja, but you could fallback here if needed
-      // emailEl.textContent = data.user_id ? data.message.split('User: ')[1] : 'Anonymous';
+function updateConnectionStatus() {
+    const statusEl = document.getElementById('connectionStatus');
+    const modelStatusEl = document.getElementById('modelStatus');
+    
+    if (!statusEl || !modelStatusEl) return;
+    
+    // Update connection status
+    switch(modelStatus) {
+        case 'connected':
+            statusEl.textContent = 'Connected';
+            statusEl.className = 'text-sm text-green-500';
+            modelStatusEl.textContent = 'All models loaded';
+            modelStatusEl.className = 'text-green-500';
+            break;
+        case 'partial':
+            statusEl.textContent = 'Connected';
+            statusEl.className = 'text-sm text-green-500';
+            modelStatusEl.textContent = 'Partial models loaded';
+            modelStatusEl.className = 'text-yellow-500';
+            break;
+        case 'loading':
+            statusEl.textContent = 'Connecting...';
+            statusEl.className = 'text-sm text-yellow-500';
+            modelStatusEl.textContent = 'Loading models...';
+            modelStatusEl.className = 'text-yellow-500';
+            break;
+        case 'disconnected':
+            statusEl.textContent = 'Disconnected';
+            statusEl.className = 'text-sm text-red-500';
+            modelStatusEl.textContent = 'Models not available';
+            modelStatusEl.className = 'text-red-500';
+            break;
+        case 'error':
+            statusEl.textContent = 'Error';
+            statusEl.className = 'text-sm text-red-400';
+            modelStatusEl.textContent = 'Model error';
+            modelStatusEl.className = 'text-red-400';
+            break;
+        default:
+            statusEl.textContent = 'Unknown';
+            statusEl.className = 'text-sm text-gray-500';
+            modelStatusEl.textContent = 'Status unknown';
+            modelStatusEl.className = 'text-gray-500';
     }
-  };
+}
 
-  // Clean up on page unload
-  window.addEventListener('beforeunload', () => ws.close());        
+async function checkModelStatus() {
+    try {
+        const response = await fetch('/api/status');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Determine model status based on server response
+        if (data.models_loaded) {
+            modelStatus = 'connected';
+        } else if (data.whisper_loaded || data.llm_loaded || data.rag_loaded) {
+            modelStatus = 'partial';
+        } else {
+            modelStatus = 'disconnected';
+        }
+        
+        updateConnectionStatus();
+        
+        // Update dot pulse animation based on status
+        updatePulseAnimation();
+        
+        return data;
+    } catch (error) {
+        console.error('Error checking model status:', error);
+        modelStatus = 'error';
+        updateConnectionStatus();
+        updatePulseAnimation();
+        return null;
+    }
+}
+
+function updatePulseAnimation() {
+    const pulseContainer = document.querySelector('.pulse-container');
+    const dotsPulse = document.querySelector('.dots-pulse');
+    
+    if (!pulseContainer || !dotsPulse) return;
+    
+    // Remove all existing animation classes
+    pulseContainer.classList.remove('connected', 'partial', 'disconnected', 'error', 'loading');
+    dotsPulse.classList.remove('connected', 'partial', 'disconnected', 'error', 'loading');
+    
+    // Add appropriate class based on status
+    pulseContainer.classList.add(modelStatus);
+    dotsPulse.classList.add(modelStatus);
+}
+
+function setupWebSocket() {
+    const sessionToken = getCookie('session_token');
+    const wsUrl = sessionToken 
+        ? `ws://${window.location.host}/ws?session_token=${encodeURIComponent(sessionToken)}`
+        : `ws://${window.location.host}/ws`;
+    
+    ws = new WebSocket(wsUrl);
+    
+    ws.onopen = () => {
+        console.log('WebSocket connected');
+        modelStatus = 'loading';
+        updateConnectionStatus();
+        
+        // Start checking model status periodically
+        checkModelStatus();
+        if (statusCheckInterval) clearInterval(statusCheckInterval);
+        statusCheckInterval = setInterval(checkModelStatus, 10000); // Check every 10 seconds
+        
+        // Send a test message to verify connection
+        ws.send(JSON.stringify({ type: 'test', message: 'Connection test' }));
+    };
+    
+    ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        modelStatus = 'disconnected';
+        updateConnectionStatus();
+        updatePulseAnimation();
+        
+        // Try to reconnect after 5 seconds
+        setTimeout(() => {
+            console.log('Attempting to reconnect...');
+            setupWebSocket();
+        }, 5000);
+    };
+    
+    ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        modelStatus = 'error';
+        updateConnectionStatus();
+        updatePulseAnimation();
+    };
+    
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            
+            // Handle different message types
+            switch(data.type) {
+                case 'test_response':
+                    console.log('Server test response:', data.message);
+                    break;
+                    
+                case 'connection_established':
+                    console.log('Connection established with session:', data.session_id);
+                    // Update user info if provided
+                    if (data.user_email && data.user_email !== 'anonymous') {
+                        const emailEl = document.getElementById('currentUserEmail');
+                        if (emailEl) {
+                            emailEl.textContent = data.user_email;
+                        }
+                    }
+                    break;
+                    
+                case 'audio_status':
+                    // Handle audio status updates
+                    handleAudioStatus(data);
+                    break;
+                    
+                case 'response':
+                    // Handle AI response
+                    handleAIResponse(data);
+                    break;
+                    
+                case 'error':
+                    console.error('Server error:', data.message);
+                    // Update model status if there's an error
+                    modelStatus = 'error';
+                    updateConnectionStatus();
+                    updatePulseAnimation();
+                    break;
+            }
+        } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
+        }
+    };
+}
+
+function handleAudioStatus(data) {
+    // You can add audio status handling here if needed
+    console.log('Audio status:', data.status);
+    
+    // If audio is generating, you might want to show a loading indicator
+    if (data.status === 'generating') {
+        // Show generating indicator
+    } else if (data.status === 'complete') {
+        // Hide generating indicator
+    }
+}
+
+function handleAIResponse(data) {
+    // Handle new AI response by adding it to conversations
+    const newConversation = {
+        id: conversations.length + 1,
+        date: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        user_message: '', // You'll need to track the user's last message
+        ai_message: data.text,
+        starred: false
+    };
+    
+    // Add to conversations array
+    conversations.unshift(newConversation);
+    
+    // Re-render conversations
+    renderConversations(currentFilter);
+    
+    // If you have the user's last message stored somewhere, update it
+    // For now, we'll just use placeholder
+    // You'll need to implement this based on your actual message flow
+}
+
+// Text input handling
+function setupTextInput() {
+    const textInput = document.getElementById('textInput');
+    const sendBtn = document.getElementById('sendTextBtn');
+    const charCount = document.getElementById('charCount');
+    
+    if (!textInput || !sendBtn || !charCount) return;
+    
+    // Update character count
+    textInput.addEventListener('input', () => {
+        const length = textInput.value.length;
+        charCount.textContent = `${length}/500`;
+        
+        // Enable/disable send button
+        sendBtn.disabled = length === 0 || length > 500;
+        
+        // Change color based on length
+        if (length > 450) {
+            charCount.className = 'char-count text-red-500';
+        } else if (length > 400) {
+            charCount.className = 'char-count text-yellow-500';
+        } else {
+            charCount.className = 'char-count text-gray-500';
+        }
+    });
+    
+    // Handle Enter key (send) and Esc key (interrupt)
+    textInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (!sendBtn.disabled && ws && ws.readyState === WebSocket.OPEN) {
+                sendTextMessage();
+            }
+        } else if (e.key === 'Escape') {
+            sendInterrupt();
+        }
+    });
+    
+    // Send button click
+    sendBtn.addEventListener('click', () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            sendTextMessage();
+        }
+    });
+    
+    function sendTextMessage() {
+        const message = textInput.value.trim();
+        if (message && ws && ws.readyState === WebSocket.OPEN) {
+            // Store user message for conversation history
+            // You might want to store this in a variable to pair with AI response
+            const userMessage = message;
+            
+            // Send via WebSocket
+            ws.send(JSON.stringify({
+                type: 'text_message',
+                text: message,
+                timestamp: new Date().toISOString()
+            }));
+            
+            // Clear input
+            textInput.value = '';
+            charCount.textContent = '0/500';
+            sendBtn.disabled = true;
+            charCount.className = 'char-count text-gray-500';
+            
+            // Store the user message temporarily
+            // You'll need to implement proper conversation tracking
+            window.lastUserMessage = userMessage;
+        }
+    }
+    
+    function sendInterrupt() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'interrupt'
+            }));
+        }
+    }
+}
+
+// Initialize everything
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize filter buttons
+    const filterButtons = document.querySelectorAll('.filter-btn');
+    filterButtons.forEach(btn => {
+        const filter = btn.getAttribute('data-filter');
+        if (filter === currentFilter) {
+            btn.classList.add('active');
+        }
+    });
+    
+    filterButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            filterButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentFilter = btn.getAttribute('data-filter');
+            localStorage.setItem('conversationFilter', currentFilter);
+            renderConversations(currentFilter);
+        });
+    });
+    
+    // Initial render
+    renderConversations(currentFilter);
+    
+    // Set initial status
+    modelStatus = 'loading';
+    updateConnectionStatus();
+    updatePulseAnimation();
+    
+    // Setup WebSocket and status checking
+    setupWebSocket();
+    
+    // Setup text input
+    setupTextInput();
+    
+    // Check model status immediately
+    checkModelStatus();
+    
+    // Clean up on page unload
+    window.addEventListener('beforeunload', () => {
+        if (ws) {
+            ws.close();
+        }
+        if (statusCheckInterval) {
+            clearInterval(statusCheckInterval);
+        }
+    });
+});
