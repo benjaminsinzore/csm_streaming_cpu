@@ -1,24 +1,10 @@
 let conversations = [
     {
-        id: 1,
-        date: "2023-10-15 14:30",
-        user_message: "Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water sources to run dry at every turn.",
-        ai_message: "That a really amazing story, thank you. Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water so. Once upon a time, in the heart of an enchanted forest, there lived a magnificent unicorn named Starlight. This magical creature was not only beautiful but also kind-hearted and wise beyond all others. In those days, a terrible drought had struck Eldoria, causing crops to wither away before their very eyes and water so. Benjamin Sinzore.",
-        starred: true
-    },
-    {
         id: 2,
         date: "2023-10-15 15:45",
         user_message: "Tell me a long bed-time story",
-        ai_message: "Once upon a time, in the magical kingdom of Eldoria, there was an enchanted forest filled with tall trees and sparkling streams. The villagers who lived nearby would often gather at the edge of the forest to listen to stories told by the wisest creatures. One evening, as the sun began its descent into the horizon, a gentle breeze whispered secrets through the leaves of the ancient trees. In this peaceful scene stood an old owl named Zephyr, who had been watching over Eldoria for many years",
+        ai_message: "In this peaceful scene stood an old owl named Zephyr, who had been watching over Eldoria for many years",
         starred: false
-    },
-    {
-        id: 3,
-        date: "2023-10-16 09:20",
-        user_message: "Can you explain quantum computing in simple terms?",
-        ai_message: "Quantum computing is a type of computation that harnesses the collective properties of quantum states, such as superposition, interference, and entanglement, to perform calculations. The devices that perform quantum computations are known as quantum computers. They are believed to be able to solve certain computational problems, such as integer factorization (which underlies RSA encryption), substantially faster than classical computers.",
-        starred: true
     }
 ];
 let currentFilter = localStorage.getItem('conversationFilter') || 'all';
@@ -203,7 +189,7 @@ function renderConversations(filter = currentFilter) {
 }
 
 // Model Status Management
-let modelStatus = 'unknown'; // unknown, connected, disconnected, error, loading
+let modelStatus = 'loading'; // loading, connected, disconnected
 let ws = null;
 let statusCheckInterval = null;
 
@@ -216,10 +202,11 @@ function getCookie(name) {
 function updateConnectionStatus() {
     const statusEl = document.getElementById('connectionStatus');
     const modelStatusEl = document.getElementById('modelStatus');
+    const userEmailEl = document.getElementById('currentUserEmail');
     
-    if (!statusEl || !modelStatusEl) return;
+    if (!statusEl || !modelStatusEl || !userEmailEl) return;
     
-    // Update connection status
+    // Update connection status text and color
     switch(modelStatus) {
         case 'connected':
             statusEl.textContent = 'Connected';
@@ -227,35 +214,31 @@ function updateConnectionStatus() {
             modelStatusEl.textContent = 'All models loaded';
             modelStatusEl.className = 'text-green-500';
             break;
-        case 'partial':
-            statusEl.textContent = 'Connected';
-            statusEl.className = 'text-sm text-green-500';
-            modelStatusEl.textContent = 'Partial models loaded';
-            modelStatusEl.className = 'text-yellow-500';
-            break;
         case 'loading':
-            statusEl.textContent = 'Connecting...';
-            statusEl.className = 'text-sm text-yellow-500';
+            statusEl.textContent = 'Connecting';
+            statusEl.className = 'text-sm text-orange-500';
             modelStatusEl.textContent = 'Loading models...';
-            modelStatusEl.className = 'text-yellow-500';
+            modelStatusEl.className = 'text-orange-500';
             break;
         case 'disconnected':
-            statusEl.textContent = 'Disconnected';
+            statusEl.textContent = 'Not connected';
             statusEl.className = 'text-sm text-red-500';
             modelStatusEl.textContent = 'Models not available';
             modelStatusEl.className = 'text-red-500';
             break;
-        case 'error':
-            statusEl.textContent = 'Error';
-            statusEl.className = 'text-sm text-red-400';
-            modelStatusEl.textContent = 'Model error';
-            modelStatusEl.className = 'text-red-400';
-            break;
         default:
-            statusEl.textContent = 'Unknown';
-            statusEl.className = 'text-sm text-gray-500';
-            modelStatusEl.textContent = 'Status unknown';
-            modelStatusEl.className = 'text-gray-500';
+            statusEl.textContent = 'Connecting';
+            statusEl.className = 'text-sm text-orange-500';
+            modelStatusEl.textContent = 'Checking status...';
+            modelStatusEl.className = 'text-orange-500';
+    }
+    
+    // Update username color
+    const userEmail = userEmailEl.textContent.trim().toLowerCase();
+    if (userEmail === 'loading' || userEmail === 'connecting...') {
+        userEmailEl.className = 'text-sm text-orange-500';
+    } else {
+        userEmailEl.className = 'text-sm text-green-500';
     }
 }
 
@@ -272,20 +255,18 @@ async function checkModelStatus() {
         if (data.models_loaded) {
             modelStatus = 'connected';
         } else if (data.whisper_loaded || data.llm_loaded || data.rag_loaded) {
-            modelStatus = 'partial';
+            modelStatus = 'connected'; // Still show as connected if any model is loaded
         } else {
             modelStatus = 'disconnected';
         }
         
         updateConnectionStatus();
-        
-        // Update dot pulse animation based on status
         updatePulseAnimation();
         
         return data;
     } catch (error) {
         console.error('Error checking model status:', error);
-        modelStatus = 'error';
+        modelStatus = 'disconnected';
         updateConnectionStatus();
         updatePulseAnimation();
         return null;
@@ -299,8 +280,8 @@ function updatePulseAnimation() {
     if (!pulseContainer || !dotsPulse) return;
     
     // Remove all existing animation classes
-    pulseContainer.classList.remove('connected', 'partial', 'disconnected', 'error', 'loading');
-    dotsPulse.classList.remove('connected', 'partial', 'disconnected', 'error', 'loading');
+    pulseContainer.classList.remove('connected', 'loading', 'disconnected');
+    dotsPulse.classList.remove('connected', 'loading', 'disconnected');
     
     // Add appropriate class based on status
     pulseContainer.classList.add(modelStatus);
@@ -344,7 +325,7 @@ function setupWebSocket() {
     
     ws.onerror = (error) => {
         console.error('WebSocket error:', error);
-        modelStatus = 'error';
+        modelStatus = 'disconnected';
         updateConnectionStatus();
         updatePulseAnimation();
     };
@@ -366,24 +347,22 @@ function setupWebSocket() {
                         const emailEl = document.getElementById('currentUserEmail');
                         if (emailEl) {
                             emailEl.textContent = data.user_email;
+                            updateConnectionStatus(); // Update colors after setting email
                         }
                     }
                     break;
                     
                 case 'audio_status':
-                    // Handle audio status updates
                     handleAudioStatus(data);
                     break;
                     
                 case 'response':
-                    // Handle AI response
                     handleAIResponse(data);
                     break;
                     
                 case 'error':
                     console.error('Server error:', data.message);
-                    // Update model status if there's an error
-                    modelStatus = 'error';
+                    modelStatus = 'disconnected';
                     updateConnectionStatus();
                     updatePulseAnimation();
                     break;
@@ -411,7 +390,7 @@ function handleAIResponse(data) {
     const newConversation = {
         id: conversations.length + 1,
         date: new Date().toISOString().replace('T', ' ').substring(0, 19),
-        user_message: '', // You'll need to track the user's last message
+        user_message: window.lastUserMessage || 'User message',
         ai_message: data.text,
         starred: false
     };
@@ -419,12 +398,11 @@ function handleAIResponse(data) {
     // Add to conversations array
     conversations.unshift(newConversation);
     
+    // Clear the stored user message
+    window.lastUserMessage = null;
+    
     // Re-render conversations
     renderConversations(currentFilter);
-    
-    // If you have the user's last message stored somewhere, update it
-    // For now, we'll just use placeholder
-    // You'll need to implement this based on your actual message flow
 }
 
 // Text input handling
@@ -441,7 +419,7 @@ function setupTextInput() {
         charCount.textContent = `${length}/500`;
         
         // Enable/disable send button
-        sendBtn.disabled = length === 0 || length > 500;
+        sendBtn.disabled = length === 0 || length > 500 || modelStatus !== 'connected';
         
         // Change color based on length
         if (length > 450) {
@@ -474,10 +452,9 @@ function setupTextInput() {
     
     function sendTextMessage() {
         const message = textInput.value.trim();
-        if (message && ws && ws.readyState === WebSocket.OPEN) {
+        if (message && ws && ws.readyState === WebSocket.OPEN && modelStatus === 'connected') {
             // Store user message for conversation history
-            // You might want to store this in a variable to pair with AI response
-            const userMessage = message;
+            window.lastUserMessage = message;
             
             // Send via WebSocket
             ws.send(JSON.stringify({
@@ -491,10 +468,6 @@ function setupTextInput() {
             charCount.textContent = '0/500';
             sendBtn.disabled = true;
             charCount.className = 'char-count text-gray-500';
-            
-            // Store the user message temporarily
-            // You'll need to implement proper conversation tracking
-            window.lastUserMessage = userMessage;
         }
     }
     
@@ -535,6 +508,12 @@ document.addEventListener('DOMContentLoaded', () => {
     modelStatus = 'loading';
     updateConnectionStatus();
     updatePulseAnimation();
+    
+    // Update username placeholder if not set
+    const userEmailEl = document.getElementById('currentUserEmail');
+    if (userEmailEl && (!userEmailEl.textContent || userEmailEl.textContent.trim() === '')) {
+        userEmailEl.textContent = 'loading';
+    }
     
     // Setup WebSocket and status checking
     setupWebSocket();
