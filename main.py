@@ -2235,6 +2235,12 @@ async def get_system_status():
 
 
 
+@app.get("/conversations", response_class=HTMLResponse)
+async def conversations_page(request: Request):
+    return templates.TemplateResponse("conversations.html", {"request": request})
+
+
+
 
 @app.get("/test")
 async def test_endpoint():
