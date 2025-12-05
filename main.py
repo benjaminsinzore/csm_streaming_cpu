@@ -2237,8 +2237,14 @@ async def get_system_status():
 
 @app.get("/conversations", response_class=HTMLResponse)
 async def conversations_page(request: Request):
-    return templates.TemplateResponse("conversations.html", {"request": request})
-
+    current_user = await get_current_user(request)
+    if not current_user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("conversations.html", {
+        "request": request,
+        "user_email": current_user.email,
+        "user_id": current_user.id
+    })
 
 
 

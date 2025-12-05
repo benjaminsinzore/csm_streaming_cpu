@@ -205,3 +205,89 @@
             renderConversations(currentFilter);
         });
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Get session token from cookie
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+  }
+
+  const sessionToken = getCookie('session_token');
+  const wsUrl = sessionToken 
+    ? `ws://localhost:8000/ws?session_token=${encodeURIComponent(sessionToken)}`
+    : 'ws://localhost:8000/ws';
+
+  const ws = new WebSocket(wsUrl);
+
+  const statusEl = document.getElementById('connectionStatus');
+  const emailEl = document.getElementById('currentUserEmail');
+
+  ws.onopen = () => {
+    statusEl.textContent = 'Connected';
+    statusEl.className = 'text-sm text-green-500';
+  };
+
+  ws.onclose = () => {
+    statusEl.textContent = 'Disconnected';
+    statusEl.className = 'text-sm text-red-500';
+  };
+
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+    statusEl.textContent = 'Error';
+    statusEl.className = 'text-sm text-red-400';
+  };
+
+  // Optional: listen for welcome message to confirm identity
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === 'test_response' && data.user_id) {
+      // Already set via Jinja, but you could fallback here if needed
+      // emailEl.textContent = data.user_id ? data.message.split('User: ')[1] : 'Anonymous';
+    }
+  };
+
+  // Clean up on page unload
+  window.addEventListener('beforeunload', () => ws.close());        
