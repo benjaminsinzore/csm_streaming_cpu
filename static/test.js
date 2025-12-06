@@ -221,7 +221,7 @@ function updateConnectionStatus() {
             modelStatusEl.className = 'text-orange-500';
             break;
         case 'disconnected':
-            statusEl.textContent = 'Not connected';
+            statusEl.textContent = 'Disconnected';
             statusEl.className = 'text-sm text-red-500';
             modelStatusEl.textContent = 'Models not available';
             modelStatusEl.className = 'text-red-500';
