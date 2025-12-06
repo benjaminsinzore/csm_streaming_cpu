@@ -14,16 +14,11 @@ const STATUS_COLORS = {
     }
 };
 
-let conversations = [
-    {
-        id: 2,
-        date: "2023-10-15 15:45",
-        user_message: "Tell me a long bed-time story",
-        ai_message: "In this peaceful scene stood an old owl named Zephyr, who had been watching over Eldoria for many years",
-        starred: false
-    }
-];
+// Initialize conversations as empty array - will be loaded from server
+let conversations = [];
 let currentFilter = localStorage.getItem('conversationFilter') || 'all';
+let isFetchingConversations = false;
+let conversationsLastUpdated = null;
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -45,6 +40,7 @@ function formatDate(dateString) {
 const MAX_PREVIEW_LENGTH = 80;
 
 function getPreviewText(text) {
+    if (!text) return '';
     const firstSentenceMatch = text.match(/^[^.!?]*[.!?](?=\s|$)|^[^.!?]+/);
     let firstSentence = firstSentenceMatch ? firstSentenceMatch[0] : text;
     if (firstSentence.length <= MAX_PREVIEW_LENGTH) {
@@ -52,6 +48,73 @@ function getPreviewText(text) {
     } else {
         return firstSentence.substring(0, MAX_PREVIEW_LENGTH).trim() + '…';
     }
+}
+
+// Function to fetch conversations from server
+async function fetchConversations() {
+    if (isFetchingConversations) return conversations;
+    
+    isFetchingConversations = true;
+    try {
+        const sessionToken = getCookie('session_token');
+        const headers = sessionToken ? {
+            'Authorization': `Bearer ${sessionToken}`
+        } : {};
+        
+        const response = await fetch('/api/user/conversations', {
+            headers: headers
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            // Transform server data to match our local format
+            conversations = data.map(conv => ({
+                id: conv.id,
+                date: conv.timestamp,
+                user_message: conv.user_message || '',
+                ai_message: conv.ai_message || '',
+                starred: false, // You might want to store starred status in your backend too
+                audio_path: conv.audio_path || '',
+                server_id: conv.id // Keep original server ID
+            }));
+            
+            conversationsLastUpdated = new Date();
+            console.log(`Loaded ${conversations.length} conversations from server`);
+            
+            return conversations;
+        } else if (response.status === 401) {
+            console.log('User not authenticated, using local conversations only');
+            // User not logged in, keep local conversations
+            return conversations;
+        } else {
+            throw new Error(`HTTP ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Error fetching conversations:', error);
+        // Return existing conversations if fetch fails
+        return conversations;
+    } finally {
+        isFetchingConversations = false;
+    }
+}
+
+// Function to refresh conversations
+async function refreshConversations() {
+    const spinner = document.createElement('div');
+    spinner.innerHTML = `
+        <div class="conversation-card" style="text-align: center; padding: 20px;">
+            <div class="loading-spinner" style="margin: 0 auto 10px; width: 30px; height: 30px; border: 3px solid #f3f4f6; border-top: 3px solid #4f46e5; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <div style="color: #6b7280;">Loading conversations...</div>
+        </div>
+    `;
+    
+    const mainContent = document.querySelector('.main-content');
+    mainContent.innerHTML = '';
+    mainContent.appendChild(spinner);
+    
+    await fetchConversations();
+    renderConversations(currentFilter);
 }
 
 function renderConversations(filter = currentFilter) {
@@ -98,10 +161,22 @@ function renderConversations(filter = currentFilter) {
             <div style="font-size: 4rem; margin-bottom: 1rem;">${emoji}</div>
             <div style="font-size: 1.25rem; font-weight: 500; margin-bottom: 0.5rem;">${message}</div>
             <div style="font-size: 0.875rem;">Start a new conversation to see it here</div>
+            <button id="refreshConversationsBtn" style="margin-top: 1rem; padding: 0.5rem 1rem; background-color: #4f46e5; color: white; border: none; border-radius: 0.375rem; cursor: pointer; transition: background-color 0.2s;">
+                Refresh Conversations
+            </button>
         `;
         mainContent.appendChild(emptyState);
+        
+        // Add refresh button event listener
+        const refreshBtn = document.getElementById('refreshConversationsBtn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', refreshConversations);
+        }
         return;
     }
+    
+    // Sort conversations by date (newest first)
+    filteredConvs.sort((a, b) => new Date(b.date) - new Date(a.date));
     
     filteredConvs.forEach(conv => {
         const fullUser = escapeHtml(conv.user_message);
@@ -149,6 +224,16 @@ function renderConversations(filter = currentFilter) {
                     </div>
                     <div class="message-content">
                         <div class="message-text">${previewAi}</div>
+                        ${conv.audio_path ? `
+                            <div class="audio-player mt-2" style="display: flex; align-items: center; gap: 8px;">
+                                <button class="play-audio-btn" data-audio-path="${conv.audio_path}" style="background: #4f46e5; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M8 5v14l11-7z"/>
+                                    </svg>
+                                </button>
+                                <span style="font-size: 0.75rem; color: #6b7280;">Play audio</span>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             </div>
@@ -169,6 +254,7 @@ function renderConversations(filter = currentFilter) {
         mainContent.appendChild(card);
     });
     
+    // Add event listeners for star icons
     document.querySelectorAll('.star-icon').forEach(icon => {
         icon.addEventListener('click', function() {
             const id = parseInt(this.getAttribute('data-id'), 10);
@@ -176,11 +262,12 @@ function renderConversations(filter = currentFilter) {
             if (conv) {
                 conv.starred = !conv.starred;
                 this.classList.toggle('active');
+                // Optionally save starred status to server here
             }
-            renderConversations(currentFilter);
         });
     });
     
+    // Add event listeners for expand icons
     document.querySelectorAll('.expand-icon').forEach(icon => {
         icon.addEventListener('click', function() {
             const id = this.getAttribute('data-id');
@@ -201,6 +288,30 @@ function renderConversations(filter = currentFilter) {
                 this.querySelector('svg').innerHTML = `<path fill-rule="evenodd" d="M15 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.56l-3.97 3.97a.75.75 0 11-1.06-1.06l3.97-3.97h-2.69a.75.75 0 01-.75-.75zm-12 0A.75.75 0 013.75 3h4.5a.75.75 0 010 1.5H5.56l3.97 3.97a.75.75 0 01-1.06 1.06L4.5 5.56v2.69a.75.75 0 01-1.5 0v-4.5zm11.47 14.78a.75.75 0 111.06-1.06l3.97 3.97v-2.69a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5a.75.75 0 010-1.5h4.5a.75.75 0 010 1.5h-2.69l-3.97-3.97zm-4.94-1.06a.75.75 0 010 1.06L5.56 19.5h2.69a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75v-4.5a.75.75 0 011.5 0v2.69l3.97-3.97a.75.75 0 011.06 0z" clip-rule="evenodd" />`;
             }
         });
+    });
+    
+    // Add event listeners for audio playback
+    document.querySelectorAll('.play-audio-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const audioPath = this.getAttribute('data-audio-path');
+            playAudio(audioPath);
+        });
+    });
+}
+
+// Audio playback function
+function playAudio(audioPath) {
+    const audio = new Audio(audioPath);
+    audio.play().catch(error => {
+        console.error('Error playing audio:', error);
+        // If the path is relative, try with absolute path
+        if (!audioPath.startsWith('http') && !audioPath.startsWith('/')) {
+            const absolutePath = '/' + audioPath;
+            const audio2 = new Audio(absolutePath);
+            audio2.play().catch(error2 => {
+                console.error('Error playing audio with absolute path:', error2);
+            });
+        }
     });
 }
 
@@ -320,6 +431,9 @@ function setupWebSocket() {
         
         // Send a test message to verify connection
         ws.send(JSON.stringify({ type: 'test', message: 'Connection test' }));
+        
+        // Request conversation history
+        ws.send(JSON.stringify({ type: 'request_conversation_history' }));
     };
     
     ws.onclose = () => {
@@ -345,6 +459,7 @@ function setupWebSocket() {
     ws.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
+            console.log('WebSocket message received:', data.type);
             
             // Handle different message types
             switch(data.type) {
@@ -379,6 +494,11 @@ function setupWebSocket() {
                     handleAIResponse(data);
                     break;
                     
+                case 'conversation_history':
+                    // Update conversations from server
+                    updateConversationsFromServer(data.conversations);
+                    break;
+                    
                 case 'error':
                     console.error('Server error:', data.message);
                     modelStatus = 'disconnected';
@@ -390,6 +510,28 @@ function setupWebSocket() {
             console.error('Error parsing WebSocket message:', error);
         }
     };
+}
+
+// Function to update conversations from server data
+function updateConversationsFromServer(serverConversations) {
+    if (!Array.isArray(serverConversations)) return;
+    
+    // Transform server data to match our local format
+    const newConversations = serverConversations.map(conv => ({
+        id: conv.id,
+        date: conv.timestamp,
+        user_message: conv.user_message || '',
+        ai_message: conv.ai_message || '',
+        starred: conversations.find(c => c.server_id === conv.id)?.starred || false, // Preserve starred status
+        audio_path: conv.audio_path || '',
+        server_id: conv.id
+    }));
+    
+    conversations = newConversations;
+    conversationsLastUpdated = new Date();
+    
+    console.log(`Updated ${conversations.length} conversations from server`);
+    renderConversations(currentFilter);
 }
 
 function handleAudioStatus(data) {
@@ -405,16 +547,18 @@ function handleAudioStatus(data) {
 }
 
 function handleAIResponse(data) {
-    // Handle new AI response by adding it to conversations
+    // Create a new conversation object from the response
     const newConversation = {
-        id: conversations.length + 1,
+        id: conversations.length > 0 ? Math.max(...conversations.map(c => c.id)) + 1 : 1,
         date: new Date().toISOString().replace('T', ' ').substring(0, 19),
         user_message: window.lastUserMessage || 'User message',
         ai_message: data.text,
-        starred: false
+        starred: false,
+        audio_path: data.audio_path || '',
+        server_id: null // Will be assigned when saved to server
     };
     
-    // Add to conversations array
+    // Add to beginning of conversations array
     conversations.unshift(newConversation);
     
     // Clear the stored user message
@@ -499,8 +643,18 @@ function setupTextInput() {
     }
 }
 
+// Auto-refresh conversations periodically (every 30 seconds)
+function startAutoRefresh() {
+    setInterval(async () => {
+        if (document.visibilityState === 'visible') {
+            await fetchConversations();
+            renderConversations(currentFilter);
+        }
+    }, 30000); // 30 seconds
+}
+
 // Initialize everything
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // Initialize filter buttons
     const filterButtons = document.querySelectorAll('.filter-btn');
     filterButtons.forEach(btn => {
@@ -520,8 +674,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
     
-    // Initial render
-    renderConversations(currentFilter);
+    // Add CSS for loading spinner
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // Initial render with loading state
+    const mainContent = document.querySelector('.main-content');
+    mainContent.innerHTML = `
+        <div class="conversation-card" style="text-align: center; padding: 40px;">
+            <div class="loading-spinner" style="margin: 0 auto 20px; width: 40px; height: 40px; border: 4px solid #f3f4f6; border-top: 4px solid #4f46e5; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <div style="color: #6b7280; font-size: 1rem;">Loading conversations...</div>
+        </div>
+    `;
     
     // Set initial status
     modelStatus = 'loading';
@@ -535,6 +705,12 @@ document.addEventListener('DOMContentLoaded', () => {
         userEmailEl.style.color = STATUS_COLORS.loading.user; // Set orange color initially
     }
     
+    // Load conversations from server
+    await fetchConversations();
+    
+    // Initial render with loaded conversations
+    renderConversations(currentFilter);
+    
     // Setup WebSocket and status checking
     setupWebSocket();
     
@@ -543,6 +719,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Check model status immediately
     checkModelStatus();
+    
+    // Start auto-refresh
+    startAutoRefresh();
     
     // Clean up on page unload
     window.addEventListener('beforeunload', () => {
