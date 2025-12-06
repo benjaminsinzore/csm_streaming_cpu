@@ -1,3 +1,19 @@
+// Status color constants
+const STATUS_COLORS = {
+    connected: {
+        status: '#10b981', // Green
+        user: '#10b981'    // Green
+    },
+    loading: {
+        status: '#f59e0b', // Orange
+        user: '#f59e0b'    // Orange
+    },
+    disconnected: {
+        status: '#ef4444', // Red
+        user: '#ef4444'    // Red
+    }
+};
+
 let conversations = [
     {
         id: 2,
@@ -206,39 +222,35 @@ function updateConnectionStatus() {
     
     if (!statusEl || !modelStatusEl || !userEmailEl) return;
     
-    // Update connection status text and color
+    // Update connection status text and set colors
     switch(modelStatus) {
         case 'connected':
             statusEl.textContent = 'Connected';
-            statusEl.className = 'text-sm text-green-500';
+            statusEl.style.color = STATUS_COLORS.connected.status;
+            userEmailEl.style.color = STATUS_COLORS.connected.user;
             modelStatusEl.textContent = 'All models loaded';
-            modelStatusEl.className = 'text-green-500';
+            modelStatusEl.style.color = STATUS_COLORS.connected.status;
             break;
         case 'loading':
             statusEl.textContent = 'Connecting';
-            statusEl.className = 'text-sm text-orange-500';
+            statusEl.style.color = STATUS_COLORS.loading.status;
+            userEmailEl.style.color = STATUS_COLORS.loading.user;
             modelStatusEl.textContent = 'Loading models...';
-            modelStatusEl.className = 'text-orange-500';
+            modelStatusEl.style.color = STATUS_COLORS.loading.status;
             break;
         case 'disconnected':
             statusEl.textContent = 'Disconnected';
-            statusEl.className = 'text-sm text-red-500';
+            statusEl.style.color = STATUS_COLORS.disconnected.status;
+            userEmailEl.style.color = STATUS_COLORS.disconnected.user;
             modelStatusEl.textContent = 'Models not available';
-            modelStatusEl.className = 'text-red-500';
+            modelStatusEl.style.color = STATUS_COLORS.disconnected.status;
             break;
         default:
             statusEl.textContent = 'Connecting';
-            statusEl.className = 'text-sm text-orange-500';
+            statusEl.style.color = STATUS_COLORS.loading.status;
+            userEmailEl.style.color = STATUS_COLORS.loading.user;
             modelStatusEl.textContent = 'Checking status...';
-            modelStatusEl.className = 'text-orange-500';
-    }
-    
-    // Update username color
-    const userEmail = userEmailEl.textContent.trim().toLowerCase();
-    if (userEmail === 'loading' || userEmail === 'connecting...') {
-        userEmailEl.className = 'text-sm text-orange-500';
-    } else {
-        userEmailEl.className = 'text-sm text-green-500';
+            modelStatusEl.style.color = STATUS_COLORS.loading.status;
     }
 }
 
@@ -338,6 +350,13 @@ function setupWebSocket() {
             switch(data.type) {
                 case 'test_response':
                     console.log('Server test response:', data.message);
+                    if (data.user_email && data.user_email !== 'anonymous') {
+                        const emailEl = document.getElementById('currentUserEmail');
+                        if (emailEl) {
+                            emailEl.textContent = data.user_email;
+                            updateConnectionStatus(); // Update colors after setting email
+                        }
+                    }
                     break;
                     
                 case 'connection_established':
@@ -423,11 +442,11 @@ function setupTextInput() {
         
         // Change color based on length
         if (length > 450) {
-            charCount.className = 'char-count text-red-500';
+            charCount.style.color = '#ef4444'; // Red
         } else if (length > 400) {
-            charCount.className = 'char-count text-yellow-500';
+            charCount.style.color = '#f59e0b'; // Orange/Yellow
         } else {
-            charCount.className = 'char-count text-gray-500';
+            charCount.style.color = '#6b7280'; // Gray
         }
     });
     
@@ -467,7 +486,7 @@ function setupTextInput() {
             textInput.value = '';
             charCount.textContent = '0/500';
             sendBtn.disabled = true;
-            charCount.className = 'char-count text-gray-500';
+            charCount.style.color = '#6b7280'; // Reset to gray
         }
     }
     
@@ -513,6 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const userEmailEl = document.getElementById('currentUserEmail');
     if (userEmailEl && (!userEmailEl.textContent || userEmailEl.textContent.trim() === '')) {
         userEmailEl.textContent = 'loading';
+        userEmailEl.style.color = STATUS_COLORS.loading.user; // Set orange color initially
     }
     
     // Setup WebSocket and status checking
