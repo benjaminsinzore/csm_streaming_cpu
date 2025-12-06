@@ -20,6 +20,13 @@ let currentFilter = localStorage.getItem('conversationFilter') || 'all';
 let isFetchingConversations = false;
 let conversationsLastUpdated = null;
 
+// Audio playback variables
+let audioContext = null;
+let audioChunks = [];
+let currentAudioGenerationId = null;
+let isPlayingAudio = false;
+let currentAudioSource = null;
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -74,9 +81,9 @@ async function fetchConversations() {
                 date: conv.timestamp,
                 user_message: conv.user_message || '',
                 ai_message: conv.ai_message || '',
-                starred: false, // You might want to store starred status in your backend too
+                starred: false,
                 audio_path: conv.audio_path || '',
-                server_id: conv.id // Keep original server ID
+                server_id: conv.id
             }));
             
             conversationsLastUpdated = new Date();
@@ -85,14 +92,12 @@ async function fetchConversations() {
             return conversations;
         } else if (response.status === 401) {
             console.log('User not authenticated, using local conversations only');
-            // User not logged in, keep local conversations
             return conversations;
         } else {
             throw new Error(`HTTP ${response.status}`);
         }
     } catch (error) {
         console.error('Error fetching conversations:', error);
-        // Return existing conversations if fetch fails
         return conversations;
     } finally {
         isFetchingConversations = false;
@@ -115,6 +120,144 @@ async function refreshConversations() {
     
     await fetchConversations();
     renderConversations(currentFilter);
+}
+
+// Audio playback functions
+async function initializeAudioContext() {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+    }
+    return audioContext;
+}
+
+function handleAudioChunk(data) {
+    console.log('Received audio chunk:', data.chunk_num, 'for generation:', data.gen_id);
+    
+    if (data.gen_id !== currentAudioGenerationId) {
+        // New audio generation, reset chunks
+        audioChunks = [];
+        currentAudioGenerationId = data.gen_id;
+        console.log('Starting new audio generation:', data.gen_id);
+    }
+    
+    try {
+        // Convert array back to Float32Array
+        const floatArray = new Float32Array(data.audio);
+        audioChunks.push(floatArray);
+        
+        console.log(`Added chunk ${data.chunk_num}, total chunks: ${audioChunks.length}, total samples: ${floatArray.length}`);
+        
+        // Update model status to show audio is streaming
+        const modelStatusEl = document.getElementById('modelStatus');
+        if (modelStatusEl) {
+            modelStatusEl.textContent = `Streaming audio... (${data.chunk_num} chunks)`;
+            modelStatusEl.style.color = '#3b82f6'; // Blue for streaming
+        }
+        
+        // If this is the first chunk, start playing after a short delay
+        if (data.chunk_num === 1) {
+            console.log('First audio chunk received, will start playback after buffer...');
+            setTimeout(() => {
+                if (audioChunks.length > 0 && !isPlayingAudio) {
+                    playBufferedAudio();
+                }
+            }, 300);
+        }
+        
+        // If we're already playing, add to buffer and continue
+        if (isPlayingAudio && audioChunks.length > 1) {
+            console.log('Adding chunk to ongoing playback');
+        }
+        
+    } catch (error) {
+        console.error('Error processing audio chunk:', error);
+        showNotification('Error processing audio chunk', 'error');
+    }
+}
+
+async function playBufferedAudio() {
+    if (audioChunks.length === 0 || isPlayingAudio) {
+        return;
+    }
+    
+    isPlayingAudio = true;
+    
+    try {
+        await initializeAudioContext();
+        
+        // Combine all chunks
+        const totalLength = audioChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        const combinedAudio = new Float32Array(totalLength);
+        
+        let offset = 0;
+        for (const chunk of audioChunks) {
+            combinedAudio.set(chunk, offset);
+            offset += chunk.length;
+        }
+        
+        console.log(`Playing audio: ${combinedAudio.length} samples at 24000 Hz`);
+        
+        // Create audio buffer (assuming 24kHz sample rate from your generator)
+        const audioBuffer = audioContext.createBuffer(1, combinedAudio.length, 24000);
+        audioBuffer.copyToChannel(combinedAudio, 0);
+        
+        // Create source and play
+        currentAudioSource = audioContext.createBufferSource();
+        currentAudioSource.buffer = audioBuffer;
+        currentAudioSource.connect(audioContext.destination);
+        
+        // Set up event handlers
+        currentAudioSource.onended = () => {
+            console.log('Audio playback finished');
+            isPlayingAudio = false;
+            currentAudioSource = null;
+            
+            // Update model status
+            const modelStatusEl = document.getElementById('modelStatus');
+            if (modelStatusEl) {
+                modelStatusEl.textContent = 'All models loaded';
+                modelStatusEl.style.color = '#10b981';
+            }
+            
+            showNotification('Audio playback complete', 'success');
+        };
+        
+        currentAudioSource.onerror = (error) => {
+            console.error('Audio playback error:', error);
+            isPlayingAudio = false;
+            currentAudioSource = null;
+            showNotification('Audio playback failed', 'error');
+        };
+        
+        // Start playback
+        console.log('Starting audio playback...');
+        currentAudioSource.start();
+        
+        showNotification('Playing audio response...', 'info');
+        
+    } catch (error) {
+        console.error('Error playing audio:', error);
+        isPlayingAudio = false;
+        showNotification('Error playing audio: ' + error.message, 'error');
+    }
+}
+
+function stopAudioPlayback() {
+    if (currentAudioSource) {
+        try {
+            currentAudioSource.stop();
+            console.log('Audio playback stopped');
+        } catch (e) {
+            console.log('Audio source already stopped');
+        }
+        currentAudioSource = null;
+    }
+    isPlayingAudio = false;
+    audioChunks = [];
+    currentAudioGenerationId = null;
 }
 
 function renderConversations(filter = currentFilter) {
@@ -167,7 +310,6 @@ function renderConversations(filter = currentFilter) {
         `;
         mainContent.appendChild(emptyState);
         
-        // Add refresh button event listener
         const refreshBtn = document.getElementById('refreshConversationsBtn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', refreshConversations);
@@ -298,34 +440,33 @@ function updateConnectionStatus() {
     
     if (!statusEl || !modelStatusEl || !userEmailEl) return;
     
-    // Update connection status text and set colors
     switch(modelStatus) {
         case 'connected':
             statusEl.textContent = 'Connected';
             statusEl.style.color = STATUS_COLORS.connected.status;
             userEmailEl.style.color = STATUS_COLORS.connected.user;
-            modelStatusEl.textContent = 'All models loaded';
+            modelStatusEl.textContent = 'Ready';
             modelStatusEl.style.color = STATUS_COLORS.connected.status;
             break;
         case 'loading':
             statusEl.textContent = 'Connecting';
             statusEl.style.color = STATUS_COLORS.loading.status;
             userEmailEl.style.color = STATUS_COLORS.loading.user;
-            modelStatusEl.textContent = 'Loading models...';
+            modelStatusEl.textContent = 'Loading...';
             modelStatusEl.style.color = STATUS_COLORS.loading.status;
             break;
         case 'disconnected':
             statusEl.textContent = 'Disconnected';
             statusEl.style.color = STATUS_COLORS.disconnected.status;
             userEmailEl.style.color = STATUS_COLORS.disconnected.user;
-            modelStatusEl.textContent = 'Models not available';
+            modelStatusEl.textContent = 'Offline';
             modelStatusEl.style.color = STATUS_COLORS.disconnected.status;
             break;
         default:
             statusEl.textContent = 'Connecting';
             statusEl.style.color = STATUS_COLORS.loading.status;
             userEmailEl.style.color = STATUS_COLORS.loading.user;
-            modelStatusEl.textContent = 'Checking status...';
+            modelStatusEl.textContent = 'Checking...';
             modelStatusEl.style.color = STATUS_COLORS.loading.status;
     }
 }
@@ -339,11 +480,10 @@ async function checkModelStatus() {
         
         const data = await response.json();
         
-        // Determine model status based on server response
         if (data.models_loaded) {
             modelStatus = 'connected';
         } else if (data.whisper_loaded || data.llm_loaded || data.rag_loaded) {
-            modelStatus = 'connected'; // Still show as connected if any model is loaded
+            modelStatus = 'connected';
         } else {
             modelStatus = 'disconnected';
         }
@@ -367,161 +507,14 @@ function updatePulseAnimation() {
     
     if (!pulseContainer || !dotsPulse) return;
     
-    // Remove all existing animation classes
     pulseContainer.classList.remove('connected', 'loading', 'disconnected');
     dotsPulse.classList.remove('connected', 'loading', 'disconnected');
     
-    // Add appropriate class based on status
     pulseContainer.classList.add(modelStatus);
     dotsPulse.classList.add(modelStatus);
 }
 
-function setupWebSocket() {
-    const sessionToken = getCookie('session_token');
-    const wsUrl = sessionToken 
-        ? `ws://${window.location.host}/ws?session_token=${encodeURIComponent(sessionToken)}`
-        : `ws://${window.location.host}/ws`;
-    
-    ws = new WebSocket(wsUrl);
-    
-    ws.onopen = () => {
-        console.log('WebSocket connected');
-        modelStatus = 'loading';
-        updateConnectionStatus();
-        
-        // Start checking model status periodically
-        checkModelStatus();
-        if (statusCheckInterval) clearInterval(statusCheckInterval);
-        statusCheckInterval = setInterval(checkModelStatus, 10000); // Check every 10 seconds
-        
-        // Send a test message to verify connection
-        ws.send(JSON.stringify({ type: 'test', message: 'Connection test' }));
-        
-        // Request conversation history
-        ws.send(JSON.stringify({ type: 'request_conversation_history' }));
-    };
-    
-    ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        modelStatus = 'disconnected';
-        updateConnectionStatus();
-        updatePulseAnimation();
-        
-        // Try to reconnect after 5 seconds
-        setTimeout(() => {
-            console.log('Attempting to reconnect...');
-            setupWebSocket();
-        }, 5000);
-    };
-    
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        modelStatus = 'disconnected';
-        updateConnectionStatus();
-        updatePulseAnimation();
-    };
-    
-    ws.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            console.log('WebSocket message received:', data.type);
-            
-            // Handle different message types
-            switch(data.type) {
-                case 'test_response':
-                    console.log('Server test response:', data.message);
-                    if (data.user_email && data.user_email !== 'anonymous') {
-                        const emailEl = document.getElementById('currentUserEmail');
-                        if (emailEl) {
-                            emailEl.textContent = data.user_email;
-                            updateConnectionStatus(); // Update colors after setting email
-                        }
-                    }
-                    break;
-                    
-                case 'connection_established':
-                    console.log('Connection established with session:', data.session_id);
-                    // Update user info if provided
-                    if (data.user_email && data.user_email !== 'anonymous') {
-                        const emailEl = document.getElementById('currentUserEmail');
-                        if (emailEl) {
-                            emailEl.textContent = data.user_email;
-                            updateConnectionStatus(); // Update colors after setting email
-                        }
-                    }
-                    break;
-                    
-                case 'audio_status':
-                    handleAudioStatus(data);
-                    break;
-                    
-                case 'response':
-                    handleAIResponse(data);
-                    break;
-                    
-                case 'conversation_history':
-                    // Update conversations from server
-                    updateConversationsFromServer(data.conversations);
-                    break;
-                    
-                case 'error':
-                    console.error('Server error:', data.message);
-                    modelStatus = 'disconnected';
-                    updateConnectionStatus();
-                    updatePulseAnimation();
-                    break;
-            }
-        } catch (error) {
-            console.error('Error parsing WebSocket message:', error);
-        }
-    };
-}
-
-// Function to update conversations from server data
-function updateConversationsFromServer(serverConversations) {
-    if (!Array.isArray(serverConversations)) return;
-    
-    // Transform server data to match our local format
-    const newConversations = serverConversations.map(conv => ({
-        id: conv.id,
-        date: conv.timestamp,
-        user_message: conv.user_message || '',
-        ai_message: conv.ai_message || '',
-        starred: conversations.find(c => c.server_id === conv.id)?.starred || false, // Preserve starred status
-        audio_path: conv.audio_path || '',
-        server_id: conv.id
-    }));
-    
-    conversations = newConversations;
-    conversationsLastUpdated = new Date();
-    
-    console.log(`Updated ${conversations.length} conversations from server`);
-    renderConversations(currentFilter);
-}
-
-function handleAudioStatus(data) {
-    // You can add audio status handling here if needed
-    console.log('Audio status:', data.status);
-    
-    // If audio is generating, you might want to show a loading indicator
-    if (data.status === 'generating') {
-        // Show generating indicator
-        showNotification('Generating audio response...', 'info');
-    } else if (data.status === 'complete') {
-        // Hide generating indicator
-        showNotification('Audio generation complete', 'success');
-        // Refresh conversations to get the updated data
-        setTimeout(() => {
-            fetchConversations().then(() => {
-                renderConversations(currentFilter);
-            });
-        }, 1000);
-    } else if (data.status === 'interrupted') {
-        showNotification('Audio generation interrupted', 'warning');
-    }
-}
-
-// Helper function to show notifications
+// Notification system
 function showNotification(message, type = 'info') {
     const colors = {
         info: '#3b82f6',
@@ -553,34 +546,174 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-// Add CSS for notifications
-const notificationStyles = document.createElement('style');
-notificationStyles.textContent = `
-    @keyframes slideIn {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
+function setupWebSocket() {
+    const sessionToken = getCookie('session_token');
+    const wsUrl = sessionToken 
+        ? `ws://${window.location.host}/ws?session_token=${encodeURIComponent(sessionToken)}`
+        : `ws://${window.location.host}/ws`;
+    
+    ws = new WebSocket(wsUrl);
+    
+    ws.onopen = () => {
+        console.log('WebSocket connected');
+        modelStatus = 'loading';
+        updateConnectionStatus();
+        
+        checkModelStatus();
+        if (statusCheckInterval) clearInterval(statusCheckInterval);
+        statusCheckInterval = setInterval(checkModelStatus, 10000);
+        
+        ws.send(JSON.stringify({ type: 'test', message: 'Connection test' }));
+        ws.send(JSON.stringify({ type: 'request_conversation_history' }));
+    };
+    
+    ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        modelStatus = 'disconnected';
+        updateConnectionStatus();
+        updatePulseAnimation();
+        
+        setTimeout(() => {
+            console.log('Attempting to reconnect...');
+            setupWebSocket();
+        }, 5000);
+    };
+    
+    ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        modelStatus = 'disconnected';
+        updateConnectionStatus();
+        updatePulseAnimation();
+    };
+    
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            console.log('WebSocket message received:', data.type);
+            
+            switch(data.type) {
+                case 'test_response':
+                    console.log('Server test response:', data.message);
+                    if (data.user_email && data.user_email !== 'anonymous') {
+                        const emailEl = document.getElementById('currentUserEmail');
+                        if (emailEl) {
+                            emailEl.textContent = data.user_email;
+                            updateConnectionStatus();
+                        }
+                    }
+                    break;
+                    
+                case 'connection_established':
+                    console.log('Connection established with session:', data.session_id);
+                    if (data.user_email && data.user_email !== 'anonymous') {
+                        const emailEl = document.getElementById('currentUserEmail');
+                        if (emailEl) {
+                            emailEl.textContent = data.user_email;
+                            updateConnectionStatus();
+                        }
+                    }
+                    break;
+                    
+                case 'audio_chunk':
+                    handleAudioChunk(data);
+                    break;
+                    
+                case 'audio_status':
+                    handleAudioStatus(data);
+                    break;
+                    
+                case 'response':
+                    handleAIResponse(data);
+                    break;
+                    
+                case 'conversation_history':
+                    updateConversationsFromServer(data.conversations);
+                    break;
+                    
+                case 'error':
+                    console.error('Server error:', data.message);
+                    modelStatus = 'disconnected';
+                    updateConnectionStatus();
+                    updatePulseAnimation();
+                    break;
+            }
+        } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
         }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
+    };
+}
+
+function handleAudioStatus(data) {
+    console.log('Audio status:', data.status, 'Gen ID:', data.gen_id);
+    
+    const modelStatusEl = document.getElementById('modelStatus');
+    
+    switch(data.status) {
+        case 'generating':
+            showNotification('Generating audio response...', 'info');
+            if (modelStatusEl) {
+                modelStatusEl.textContent = 'Generating audio...';
+                modelStatusEl.style.color = '#f59e0b';
+            }
+            break;
+        case 'first_chunk':
+            showNotification('Audio generation started', 'info');
+            if (modelStatusEl) {
+                modelStatusEl.textContent = 'Audio streaming...';
+                modelStatusEl.style.color = '#3b82f6';
+            }
+            break;
+        case 'complete':
+            showNotification('Audio generation complete', 'success');
+            if (modelStatusEl) {
+                modelStatusEl.textContent = 'Audio complete';
+                modelStatusEl.style.color = '#10b981';
+            }
+            
+            // If we have chunks but haven't started playing, start now
+            setTimeout(() => {
+                if (audioChunks.length > 0 && !isPlayingAudio) {
+                    console.log('Starting delayed playback after completion');
+                    playBufferedAudio();
+                }
+            }, 500);
+            break;
+        case 'interrupted':
+            stopAudioPlayback();
+            showNotification('Audio generation interrupted', 'warning');
+            if (modelStatusEl) {
+                modelStatusEl.textContent = 'Audio interrupted';
+                modelStatusEl.style.color = '#ef4444';
+            }
+            break;
+        case 'preparing_generation':
+            showNotification('Preparing audio generation...', 'info');
+            break;
     }
-    @keyframes slideOut {
-        from {
-            transform: translateX(0);
-            opacity: 1;
-        }
-        to {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-    }
-`;
-document.head.appendChild(notificationStyles);
+}
+
+// Function to update conversations from server data
+function updateConversationsFromServer(serverConversations) {
+    if (!Array.isArray(serverConversations)) return;
+    
+    const newConversations = serverConversations.map(conv => ({
+        id: conv.id,
+        date: conv.timestamp,
+        user_message: conv.user_message || '',
+        ai_message: conv.ai_message || '',
+        starred: conversations.find(c => c.server_id === conv.id)?.starred || false,
+        audio_path: conv.audio_path || '',
+        server_id: conv.id
+    }));
+    
+    conversations = newConversations;
+    conversationsLastUpdated = new Date();
+    
+    console.log(`Updated ${conversations.length} conversations from server`);
+    renderConversations(currentFilter);
+}
 
 function handleAIResponse(data) {
-    // Create a new conversation object from the response
     const newConversation = {
         id: conversations.length > 0 ? Math.max(...conversations.map(c => c.id)) + 1 : 1,
         date: new Date().toISOString().replace('T', ' ').substring(0, 19),
@@ -588,24 +721,18 @@ function handleAIResponse(data) {
         ai_message: data.text,
         starred: false,
         audio_path: data.audio_path || '',
-        server_id: null // Will be assigned when saved to server
+        server_id: null
     };
     
-    // Add to beginning of conversations array
     conversations.unshift(newConversation);
-    
-    // Clear the stored user message
     window.lastUserMessage = null;
-    
-    // Re-render conversations
     renderConversations(currentFilter);
     
-    // Also refresh from server to get the updated data
     setTimeout(() => {
         fetchConversations().then(() => {
             renderConversations(currentFilter);
         });
-    }, 2000); // Wait 2 seconds for data to be saved
+    }, 2000);
 }
 
 // Text input handling
@@ -616,25 +743,21 @@ function setupTextInput() {
     
     if (!textInput || !sendBtn || !charCount) return;
     
-    // Update character count
     textInput.addEventListener('input', () => {
         const length = textInput.value.length;
         charCount.textContent = `${length}/500`;
         
-        // Enable/disable send button
         sendBtn.disabled = length === 0 || length > 500 || modelStatus !== 'connected';
         
-        // Change color based on length
         if (length > 450) {
-            charCount.style.color = '#ef4444'; // Red
+            charCount.style.color = '#ef4444';
         } else if (length > 400) {
-            charCount.style.color = '#f59e0b'; // Orange/Yellow
+            charCount.style.color = '#f59e0b';
         } else {
-            charCount.style.color = '#6b7280'; // Gray
+            charCount.style.color = '#6b7280';
         }
     });
     
-    // Handle Enter key (send) and Esc key (interrupt)
     textInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -646,7 +769,6 @@ function setupTextInput() {
         }
     });
     
-    // Send button click
     sendBtn.addEventListener('click', () => {
         if (ws && ws.readyState === WebSocket.OPEN) {
             sendTextMessage();
@@ -656,23 +778,19 @@ function setupTextInput() {
     function sendTextMessage() {
         const message = textInput.value.trim();
         if (message && ws && ws.readyState === WebSocket.OPEN && modelStatus === 'connected') {
-            // Store user message for conversation history
             window.lastUserMessage = message;
             
-            // Send via WebSocket
             ws.send(JSON.stringify({
                 type: 'text_message',
                 text: message,
                 timestamp: new Date().toISOString()
             }));
             
-            // Clear input
             textInput.value = '';
             charCount.textContent = '0/500';
             sendBtn.disabled = true;
-            charCount.style.color = '#6b7280'; // Reset to gray
+            charCount.style.color = '#6b7280';
             
-            // Show sending notification
             showNotification('Sending message...', 'info');
         }
     }
@@ -682,23 +800,54 @@ function setupTextInput() {
             ws.send(JSON.stringify({
                 type: 'interrupt'
             }));
+            stopAudioPlayback();
             showNotification('Interrupt sent', 'warning');
         }
     }
 }
 
-// Auto-refresh conversations periodically (every 30 seconds)
+// Auto-refresh conversations
 function startAutoRefresh() {
     setInterval(async () => {
         if (document.visibilityState === 'visible') {
             await fetchConversations();
             renderConversations(currentFilter);
         }
-    }, 30000); // 30 seconds
+    }, 30000);
 }
 
 // Initialize everything
 document.addEventListener('DOMContentLoaded', async () => {
+    // Add notification styles
+    const notificationStyles = document.createElement('style');
+    notificationStyles.textContent = `
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    `;
+    document.head.appendChild(notificationStyles);
+    
     // Initialize filter buttons
     const filterButtons = document.querySelectorAll('.filter-btn');
     filterButtons.forEach(btn => {
@@ -718,16 +867,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
     
-    // Add CSS for loading spinner
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    `;
-    document.head.appendChild(style);
-    
     // Initial render with loading state
     const mainContent = document.querySelector('.main-content');
     mainContent.innerHTML = `
@@ -742,11 +881,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateConnectionStatus();
     updatePulseAnimation();
     
-    // Update username placeholder if not set
+    // Update username placeholder
     const userEmailEl = document.getElementById('currentUserEmail');
     if (userEmailEl && (!userEmailEl.textContent || userEmailEl.textContent.trim() === '')) {
         userEmailEl.textContent = 'loading';
-        userEmailEl.style.color = STATUS_COLORS.loading.user; // Set orange color initially
+        userEmailEl.style.color = STATUS_COLORS.loading.user;
     }
     
     // Load conversations from server
@@ -775,5 +914,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (statusCheckInterval) {
             clearInterval(statusCheckInterval);
         }
+        stopAudioPlayback();
     });
 });
