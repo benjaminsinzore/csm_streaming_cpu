@@ -20,6 +20,10 @@ let currentFilter = localStorage.getItem('conversationFilter') || 'all';
 let isFetchingConversations = false;
 let conversationsLastUpdated = null;
 
+// Audio player state
+let currentAudio = null;
+let currentPlayingBtn = null;
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -115,6 +119,142 @@ async function refreshConversations() {
     
     await fetchConversations();
     renderConversations(currentFilter);
+}
+
+// Function to play audio
+function playAudio(audioPath, playButton) {
+    // Stop currently playing audio
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        if (currentPlayingBtn) {
+            currentPlayingBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"/>
+                </svg>
+            `;
+            currentPlayingBtn.style.background = '#4f46e5';
+            currentPlayingBtn.style.color = 'white';
+        }
+    }
+    
+    // If clicking the same button, just stop
+    if (currentPlayingBtn === playButton && currentAudio) {
+        currentAudio = null;
+        currentPlayingBtn = null;
+        return;
+    }
+    
+    // Create audio element
+    currentAudio = new Audio();
+    currentPlayingBtn = playButton;
+    
+    // Update button to show playing state
+    playButton.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16"/>
+            <rect x="14" y="4" width="4" height="16"/>
+        </svg>
+    `;
+    playButton.style.background = '#ef4444'; // Red when playing
+    playButton.style.color = 'white';
+    
+    // Handle audio events
+    currentAudio.addEventListener('ended', () => {
+        playButton.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+            </svg>
+        `;
+        playButton.style.background = '#4f46e5';
+        playButton.style.color = 'white';
+        currentAudio = null;
+        currentPlayingBtn = null;
+    });
+    
+    currentAudio.addEventListener('error', (error) => {
+        console.error('Error playing audio:', error);
+        playButton.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+        `;
+        playButton.style.background = '#f59e0b';
+        playButton.style.color = 'white';
+        currentAudio = null;
+        currentPlayingBtn = null;
+        
+        // Show error message
+        const errorMsg = document.createElement('div');
+        errorMsg.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #ef4444; color: white; padding: 10px 15px; border-radius: 5px; z-index: 1000;';
+        errorMsg.textContent = 'Audio file not found or cannot be played';
+        document.body.appendChild(errorMsg);
+        setTimeout(() => errorMsg.remove(), 3000);
+    });
+    
+    // Try different path formats
+    const audioUrls = [
+        audioPath,
+        '/' + audioPath,
+        '/static/' + audioPath,
+        audioPath.replace('audio/', '/audio/'),
+        window.location.origin + '/' + audioPath,
+        window.location.origin + '/static/' + audioPath,
+        window.location.origin + audioPath.startsWith('/') ? audioPath : '/' + audioPath
+    ];
+    
+    // Try each URL until one works
+    const tryNextUrl = (index) => {
+        if (index >= audioUrls.length) {
+            console.error('All audio URLs failed');
+            playButton.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                </svg>
+            `;
+            playButton.style.background = '#ef4444';
+            playButton.style.color = 'white';
+            
+            // Show error message
+            const errorMsg = document.createElement('div');
+            errorMsg.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #ef4444; color: white; padding: 10px 15px; border-radius: 5px; z-index: 1000;';
+            errorMsg.textContent = 'Could not find audio file. Please check server logs.';
+            document.body.appendChild(errorMsg);
+            setTimeout(() => errorMsg.remove(), 3000);
+            return;
+        }
+        
+        const url = audioUrls[index];
+        console.log(`Trying audio URL: ${url}`);
+        
+        // Check if the file exists
+        fetch(url, { method: 'HEAD' })
+            .then(response => {
+                if (response.ok) {
+                    currentAudio.src = url;
+                    return currentAudio.play();
+                } else {
+                    throw new Error(`File not found: ${url}`);
+                }
+            })
+            .then(() => {
+                console.log(`Audio playing from: ${url}`);
+                
+                // Show success message
+                const successMsg = document.createElement('div');
+                successMsg.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #10b981; color: white; padding: 10px 15px; border-radius: 5px; z-index: 1000;';
+                successMsg.textContent = 'Playing audio...';
+                document.body.appendChild(successMsg);
+                setTimeout(() => successMsg.remove(), 2000);
+            })
+            .catch(error => {
+                console.log(`Audio URL ${url} failed:`, error.message);
+                tryNextUrl(index + 1);
+            });
+    };
+    
+    // Start trying URLs
+    tryNextUrl(0);
 }
 
 function renderConversations(filter = currentFilter) {
@@ -225,13 +365,16 @@ function renderConversations(filter = currentFilter) {
                     <div class="message-content">
                         <div class="message-text">${previewAi}</div>
                         ${conv.audio_path ? `
-                            <div class="audio-player mt-2" style="display: flex; align-items: center; gap: 8px;">
-                                <button class="play-audio-btn" data-audio-path="${conv.audio_path}" style="background: #4f46e5; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                            <div class="audio-player mt-2" style="display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 8px 12px; background-color: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
+                                <button class="play-audio-btn" data-audio-path="${conv.audio_path}" style="background: #4f46e5; color: white; border: none; border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background-color 0.2s; flex-shrink: 0;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M8 5v14l11-7z"/>
                                     </svg>
                                 </button>
-                                <span style="font-size: 0.75rem; color: #6b7280;">Play audio</span>
+                                <div style="display: flex; flex-direction: column; flex-grow: 1;">
+                                    <span style="font-size: 0.8rem; color: #374151; font-weight: 500;">Audio Response</span>
+                                    <span style="font-size: 0.7rem; color: #6b7280;" class="audio-path">Click play to listen</span>
+                                </div>
                             </div>
                         ` : ''}
                     </div>
@@ -292,26 +435,22 @@ function renderConversations(filter = currentFilter) {
     
     // Add event listeners for audio playback
     document.querySelectorAll('.play-audio-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation(); // Prevent event bubbling
             const audioPath = this.getAttribute('data-audio-path');
-            playAudio(audioPath);
+            if (audioPath && audioPath.trim() !== '') {
+                playAudio(audioPath, this);
+            } else {
+                console.error('No audio path found for this conversation');
+                
+                // Show error message
+                const errorMsg = document.createElement('div');
+                errorMsg.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #ef4444; color: white; padding: 10px 15px; border-radius: 5px; z-index: 1000;';
+                errorMsg.textContent = 'No audio file available for this response';
+                document.body.appendChild(errorMsg);
+                setTimeout(() => errorMsg.remove(), 3000);
+            }
         });
-    });
-}
-
-// Audio playback function
-function playAudio(audioPath) {
-    const audio = new Audio(audioPath);
-    audio.play().catch(error => {
-        console.error('Error playing audio:', error);
-        // If the path is relative, try with absolute path
-        if (!audioPath.startsWith('http') && !audioPath.startsWith('/')) {
-            const absolutePath = '/' + audioPath;
-            const audio2 = new Audio(absolutePath);
-            audio2.play().catch(error2 => {
-                console.error('Error playing audio with absolute path:', error2);
-            });
-        }
     });
 }
 
@@ -541,10 +680,78 @@ function handleAudioStatus(data) {
     // If audio is generating, you might want to show a loading indicator
     if (data.status === 'generating') {
         // Show generating indicator
+        showNotification('Generating audio response...', 'info');
     } else if (data.status === 'complete') {
         // Hide generating indicator
+        showNotification('Audio generation complete', 'success');
+        // Refresh conversations to get the audio file
+        setTimeout(() => {
+            fetchConversations().then(() => {
+                renderConversations(currentFilter);
+            });
+        }, 1000);
+    } else if (data.status === 'interrupted') {
+        showNotification('Audio generation interrupted', 'warning');
     }
 }
+
+// Helper function to show notifications
+function showNotification(message, type = 'info') {
+    const colors = {
+        info: '#3b82f6',
+        success: '#10b981',
+        warning: '#f59e0b',
+        error: '#ef4444'
+    };
+    
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: ${colors[type] || colors.info};
+        color: white;
+        padding: 12px 18px;
+        border-radius: 6px;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        animation: slideIn 0.3s ease;
+    `;
+    
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
+// Add CSS for notifications
+const notificationStyles = document.createElement('style');
+notificationStyles.textContent = `
+    @keyframes slideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+    @keyframes slideOut {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+    }
+`;
+document.head.appendChild(notificationStyles);
 
 function handleAIResponse(data) {
     // Create a new conversation object from the response
@@ -566,6 +773,13 @@ function handleAIResponse(data) {
     
     // Re-render conversations
     renderConversations(currentFilter);
+    
+    // Also refresh from server to get the actual audio path
+    setTimeout(() => {
+        fetchConversations().then(() => {
+            renderConversations(currentFilter);
+        });
+    }, 2000); // Wait 2 seconds for audio to be generated
 }
 
 // Text input handling
@@ -631,6 +845,9 @@ function setupTextInput() {
             charCount.textContent = '0/500';
             sendBtn.disabled = true;
             charCount.style.color = '#6b7280'; // Reset to gray
+            
+            // Show sending notification
+            showNotification('Sending message...', 'info');
         }
     }
     
@@ -639,6 +856,7 @@ function setupTextInput() {
             ws.send(JSON.stringify({
                 type: 'interrupt'
             }));
+            showNotification('Interrupt sent', 'warning');
         }
     }
 }
@@ -730,6 +948,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         if (statusCheckInterval) {
             clearInterval(statusCheckInterval);
+        }
+        if (currentAudio) {
+            currentAudio.pause();
         }
     });
 });
